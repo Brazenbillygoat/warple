@@ -14,6 +14,12 @@ struct Payload {
 }
 
 fn build_app() {
+    let context = tauri::generate_context!();
+    let log_root = conf::app_config_root_from_base(
+        &dirs::config_dir().expect("operating system config directory is unavailable"),
+        &context.config().identifier,
+    );
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             println!("{}, {argv:?}, {cwd}", app.package_info().name);
@@ -29,7 +35,7 @@ fn build_app() {
                 .clear_targets()
                 .targets([
                     Target::new(TargetKind::Folder {
-                        path: app::conf::app_root(),
+                        path: log_root,
                         file_name: None,
                     }),
                     Target::new(TargetKind::Stdout),
@@ -46,8 +52,9 @@ fn build_app() {
                 .set_ignore_cursor_events(true)
                 .unwrap_or_else(|err| println!("{:?}", err));
 
-            conf::if_app_config_does_not_exist_create_default(app, "settings.json");
-            conf::if_app_config_does_not_exist_create_default(app, "pets.json");
+            let app_handle = app.handle().clone();
+            conf::if_app_config_does_not_exist_create_default(&app_handle, "settings.json");
+            conf::if_app_config_does_not_exist_create_default(&app_handle, "pets.json");
             tray::init_system_tray(app)?;
             info!("app started");
             Ok(())
@@ -60,7 +67,7 @@ fn build_app() {
             cmd::open_config_folder,
             utils::reopen_main_window,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while running tauri application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
@@ -78,4 +85,26 @@ fn main() {
     );
 
     build_app();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app::conf;
+    use std::path::Path;
+
+    #[test]
+    fn generated_identity_derives_the_warple_app_config_root() {
+        let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+
+        assert_eq!(context.config().product_name.as_deref(), Some("Warple"));
+        assert_eq!(context.config().main_binary_name.as_deref(), Some("Warple"));
+        assert_eq!(
+            context.config().identifier,
+            "io.github.brazenbillygoat.warple"
+        );
+        assert_eq!(
+            conf::app_config_root_from_base(Path::new("config"), &context.config().identifier),
+            Path::new("config").join("io.github.brazenbillygoat.warple")
+        );
+    }
 }

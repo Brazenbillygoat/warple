@@ -27,12 +27,8 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://github.com/SeakMengs" },
-        { "url": "https://github.com/SeakMengs/WindowPet" },
-        { "url": "https://github.com/SeakMengs/WindowPet/issues" },
-        { "url": "https://github.com/SeakMengs/WindowPet/discussions" },
-        { "url": "https://github.com/SeakMengs/WindowPet/releases/tag/v*" },
-        { "url": "https://www.buymeacoffee.com/seakmeng" }
+        { "url": "https://github.com/Brazenbillygoat/warple" },
+        { "url": "https://github.com/SeakMengs/WindowPet" }
       ]
     }
   ]

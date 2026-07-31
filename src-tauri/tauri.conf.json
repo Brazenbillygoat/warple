@@ -18,10 +18,10 @@
     "category": "Productivity",
     "copyright": "Copyright (c) 2023 Seakmeng"
   },
-  "productName": "WindowPet",
-  "mainBinaryName": "WindowPet",
+  "productName": "Warple",
+  "mainBinaryName": "Warple",
   "version": "0.0.9",
-  "identifier": "WindowPet",
+  "identifier": "io.github.brazenbillygoat.warple",
   "app": {
     "withGlobalTauri": false,
     "security": {
@@ -50,7 +50,7 @@
       {
         "fullscreen": true,
         "resizable": false,
-        "title": "WindowPet",
+        "title": "Warple",
         "width": 64,
         "height": 64,
         "transparent": true,

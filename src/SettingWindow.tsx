@@ -95,7 +95,7 @@ function SettingWindow() {
     {
       Component: About,
       title: t("About"),
-      description: t("Know more about WindowPet"),
+      description: t("Know more about Warple"),
       Icon: <IconInfoCircle size="1rem" />,
       label: t('About'),
       tab: ESettingTab.About,

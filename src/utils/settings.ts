@@ -13,7 +13,7 @@ export async function getAppSettings({ configName = "settings.json", key = "app"
 
     const data = await invoke<any | null>("read_app_config", { config_name: configName });
     if (data === null) {
-        if (withErrorDialog) await confirm(`Could not get data from ${configName}`, { title: "WindowPet Dialog", kind: 'error' });
+        if (withErrorDialog) await confirm(`Could not get data from ${configName}`, { title: "Warple Dialog", kind: 'error' });
 
         return;
     }
@@ -77,7 +77,7 @@ export async function saveCustomPet(petObject: IPetObject) {
 
         showNotification({
             title: i18next.t("Custom Pet Added"),
-            message: i18next.t(`pet name has been added to your custom pet list, restart WindowPet and check pet shop to spawn your custom pet`, { name: petObject.name }),
+            message: i18next.t(`pet name has been added to your custom pet list, restart Warple and check pet shop to spawn your custom pet`, { name: petObject.name }),
         });
         info(`Successfully save custom pet, pet name: ${petObject.name}`);
     } catch (err) {

@@ -16,7 +16,7 @@ Warple is a transparent desktop-pet overlay built with Tauri, React, and Phaser.
 
 The longer-term goal is a subtle creature with a recognizable personality rather than a random animation machine or a notification system with legs. We are building toward that carefully. AI features, activity tracking, persistent behavioral memory, and broad computer access are not part of the current app. Not sure they will be but I have an eye toward them.
 
-Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by [SeakMengs](https://github.com/SeakMengs). WindowPet provided the original application, pet engine, settings interface, and bundled pet collection. That work remains credited and is being phased into Warple over time instead of being passed off as original work.
+Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by [SeakMengs](https://github.com/SeakMengs). WindowPet provided the original application, pet engine, settings interface, and bundled pet collection. That work remains credited while the current project's application-owned identity uses Warple.
 
 ## ✨ Features
 
@@ -99,7 +99,9 @@ Transparent Tauri desktop window
 
 ## ✨ Local data and safety
 
-Warple stores its data in the operating system's application-config directory under the existing `WindowPet` folder. That internal name is intentionally being phased out gradually.
+Warple stores its data in the operating system's standard application-config directory for `io.github.brazenbillygoat.warple`. On Windows this resolves to `%APPDATA%\io.github.brazenbillygoat.warple`.
+
+Legacy `%APPDATA%\WindowPet` data is not read, copied, moved, or deleted. Warple starts with newly generated defaults under its own identifier-derived directory.
 
 The native layer accepts only:
 

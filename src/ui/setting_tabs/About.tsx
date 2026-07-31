@@ -20,54 +20,31 @@ function About() {
 
     const titleAndLinks = useMemo(() => ([
         {
-            title: t("Developed by:"),
-            link: {
-                url: "https://github.com/SeakMengs",
-                label: t("@Seakmeng"),
-            },
-        },
-        {
             title: t("Source code:"),
             link: {
+                url: "https://github.com/Brazenbillygoat/warple",
+                label: "Brazenbillygoat/warple",
+            },
+        },
+        {
+            title: t("Upstream project:"),
+            link: {
                 url: "https://github.com/SeakMengs/WindowPet",
-                label: t("@SeakMengs/WindowPet"),
+                label: "SeakMengs/WindowPet",
             },
         },
-        {
-            title: t("Report a bug:"),
-            link: {
-                url: "https://github.com/SeakMengs/WindowPet/issues",
-                label: t("@SeakMengs/WindowPet/issues"),
-            },
-        },
-        {
-            title: t("Community: "),
-            link: {
-                url: "https://github.com/SeakMengs/WindowPet/discussions",
-                label: t("@SeakMengs/WindowPet/discussions"),
-            },
-        },
-        {
-            title: t("Buy me a coffee:"),
-            link: {
-                url: "https://www.buymeacoffee.com/seakmeng",
-                label: t("BuyMeACoffee/@Seakmeng"),
-            },
-        },
-    ]), []);
+    ]), [t]);
 
     return (
         <Flex align={"center"} justify={"center"} direction={"column"} gap={"md"}>
             <Avatar
                 src="/media/icon.png"
-                alt="WindowPet"
+                alt="Warple"
                 w={128}
                 h={128}
             />
-            <Text fw={700}>WindowPet</Text>
-            <Text display={"flex"}>{t("Version", { version: appVersion })}
-                <Anchor mx={"xs"} onClick={() => openUrl(`https://github.com/SeakMengs/WindowPet/releases/tag/v${appVersion}`)}>{t("(release note)")}</Anchor>
-            </Text>
+            <Text fw={700}>Warple</Text>
+            <Text>{t("Version", { version: appVersion })}</Text>
             <Text color="dimmed">Updates are disabled for this development baseline.</Text>
             {
                 titleAndLinks.map((item, index) => (

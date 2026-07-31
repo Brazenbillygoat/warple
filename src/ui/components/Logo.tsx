@@ -6,7 +6,7 @@ function Logo() {
     <>
       <Avatar
         src="/media/icon.png"
-        alt="WindowPet"
+        alt="Warple"
       />
     </>
   );

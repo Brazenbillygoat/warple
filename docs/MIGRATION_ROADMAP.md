@@ -6,11 +6,16 @@ Warple is being modernized in small slices so dependency changes stay understand
 
 | Order | Migration | Why | Risk | Urgency |
 | --- | --- | --- | --- | --- |
-| 1 | WindowPet identifiers and user data to Warple | Finishes the product rename without abandoning existing settings or custom pets | High | Before the installed user base grows |
-| 2 | Mantine 7 to 9 | Brings the settings UI onto the current major version | High | Later |
-| 3 | Zustand, i18next, react-i18next, and other small libraries | Reduces routine dependency drift | Low to medium | Opportunistic |
-| 4 | TypeScript 7 and Rust edition 2024 | Modernizes compiler and language baselines | Medium | Later |
-| 5 | Phaser 3 to 4 | Moves the behavior and physics engine to its next major generation | Very high | Last, after stronger behavior tests |
+| 1 | Mantine 7 to 9 | Brings the settings UI onto the current major version | High | Later |
+| 2 | Zustand, i18next, react-i18next, and other small libraries | Reduces routine dependency drift | Low to medium | Opportunistic |
+| 3 | TypeScript 7 and Rust edition 2024 | Modernizes compiler and language baselines | Medium | Later |
+| 4 | Phaser 3 to 4 | Moves the behavior and physics engine to its next major generation | Very high | Last, after stronger behavior tests |
+
+## Completed: Warple application identity
+
+The project-owned package, crate, product, executable, bundle, Tauri identifier, configuration root, user-facing branding, and release artifact identity now use Warple. Tauri's identifier is `io.github.brazenbillygoat.warple`, and runtime configuration uses its standard identifier-derived `$APPCONFIG` directory.
+
+No external users or retained custom data depended on the legacy identity, so the rebrand deliberately starts with fresh defaults. Legacy `%APPDATA%\WindowPet` data remains untouched and is not read, copied, moved, or deleted. WindowPet references remain only for upstream, historical, license, and bundled-artwork attribution.
 
 ## Completed: React Router advisory
 
@@ -24,4 +29,4 @@ Manual desktop review remains required before the migration is merged.
 
 Each major migration gets its own branch, compatibility review, focused tests, production frontend build, desktop build, and user-owned manual run. Unrelated migrations should not be bundled together merely because newer versions are available.
 
-The WindowPet-to-Warple identifier migration needs an explicit data migration and rollback path. The Phaser migration should wait until pet states, movement, and physics have enough automated coverage to catch behavior regressions.
+The Phaser migration should wait until pet states, movement, and physics have enough automated coverage to catch behavior regressions.

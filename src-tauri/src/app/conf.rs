@@ -6,7 +6,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use tauri::App;
+use tauri::{AppHandle, Manager};
 
 // These are the only JSON files allowed directly under the application data root.
 const ROOT_CONFIG_FILES: [&str; 3] = ["settings.json", "pets.json", "pet_linker.json"];
@@ -17,8 +17,8 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn new() -> AppConfig {
-        let theme = read_app_config("settings.json")
+    pub fn new(app: &AppHandle) -> AppConfig {
+        let theme = read_app_config(app.clone(), "settings.json")
             .ok()
             .flatten()
             .and_then(|settings| settings.get("theme")?.as_str().map(str::to_owned))
@@ -40,10 +40,14 @@ pub fn convert_path(path_str: &str) -> Option<String> {
     }
 }
 
-pub fn app_root() -> PathBuf {
-    dirs::config_dir()
-        .expect("operating system config directory is unavailable")
-        .join("WindowPet")
+pub fn app_config_root_from_base(config_dir: &Path, identifier: &str) -> PathBuf {
+    config_dir.join(identifier)
+}
+
+pub fn app_root(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map_err(|err| format!("Could not resolve the Warple data directory: {err}"))
 }
 
 fn has_only_normal_components(path: &Path) -> bool {
@@ -70,41 +74,42 @@ fn is_allowed_asset_path(path: &Path) -> bool {
     is_file_in_bucket(path, "assets", "png")
 }
 
-fn relative_to_app_root(path_str: &str) -> Result<PathBuf, String> {
+fn relative_to_app_root(root: &Path, path_str: &str) -> Result<PathBuf, String> {
     let supplied = PathBuf::from(path_str);
     if supplied.is_absolute() {
         // Absolute paths are accepted only when they already point inside this app's data root.
         supplied
-            .strip_prefix(app_root())
+            .strip_prefix(root)
             .map(Path::to_path_buf)
-            .map_err(|_| "Path is outside the WindowPet data directory".to_string())
+            .map_err(|_| "Path is outside the Warple data directory".to_string())
     } else {
         Ok(supplied)
     }
 }
 
-fn resolve_config_path(config_name: &str) -> Result<PathBuf, String> {
+fn resolve_config_path(root: &Path, config_name: &str) -> Result<PathBuf, String> {
     // Keep the allowlist here so every read and write command shares the same boundary.
-    let relative = relative_to_app_root(config_name)?;
+    let relative = relative_to_app_root(root, config_name)?;
     if !is_allowed_config_path(&relative) {
         return Err(format!("Config path is not allowed: {config_name}"));
     }
 
-    Ok(app_root().join(relative))
+    Ok(root.join(relative))
 }
 
-fn resolve_app_path(path_str: &str) -> Result<PathBuf, String> {
-    let relative = relative_to_app_root(path_str)?;
+fn resolve_app_path(root: &Path, path_str: &str) -> Result<PathBuf, String> {
+    let relative = relative_to_app_root(root, path_str)?;
     if !is_allowed_config_path(&relative) && !is_allowed_asset_path(&relative) {
         return Err(format!("App data path is not allowed: {path_str}"));
     }
 
-    Ok(app_root().join(relative))
+    Ok(root.join(relative))
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn combine_config_path(config_name: &str) -> Result<String, String> {
-    let path = resolve_app_path(config_name)?;
+pub fn combine_config_path(app: AppHandle, config_name: &str) -> Result<String, String> {
+    let root = app_root(&app)?;
+    let path = resolve_app_path(&root, config_name)?;
     convert_path(
         path.to_str()
             .ok_or_else(|| "App data path contains invalid characters".to_string())?,
@@ -113,8 +118,9 @@ pub fn combine_config_path(config_name: &str) -> Result<String, String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn read_app_config(config_name: &str) -> Result<Option<Value>, String> {
-    let path = resolve_config_path(config_name)?;
+pub fn read_app_config(app: AppHandle, config_name: &str) -> Result<Option<Value>, String> {
+    let root = app_root(&app)?;
+    let path = resolve_config_path(&root, config_name)?;
     if !path.exists() {
         return Ok(None);
     }
@@ -128,8 +134,9 @@ pub fn read_app_config(config_name: &str) -> Result<Option<Value>, String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn write_app_config(config_name: &str, value: Value) -> Result<(), String> {
-    let path = resolve_config_path(config_name)?;
+pub fn write_app_config(app: AppHandle, config_name: &str, value: Value) -> Result<(), String> {
+    let root = app_root(&app)?;
+    let path = resolve_config_path(&root, config_name)?;
     let parent = path
         .parent()
         .ok_or_else(|| "Config path has no parent directory".to_string())?;
@@ -142,8 +149,15 @@ pub fn write_app_config(config_name: &str, value: Value) -> Result<(), String> {
     fs::write(&path, document).map_err(|err| format!("Could not write '{}': {err}", path.display()))
 }
 
-pub fn if_app_config_does_not_exist_create_default(_app: &mut App, config_name: &str) {
-    let path = match resolve_config_path(config_name) {
+pub fn if_app_config_does_not_exist_create_default(app: &AppHandle, config_name: &str) {
+    let root = match app_root(app) {
+        Ok(root) => root,
+        Err(err) => {
+            error!("{err}");
+            return;
+        }
+    };
+    let path = match resolve_config_path(&root, config_name) {
         Ok(path) => path,
         Err(err) => {
             error!("{err}");
@@ -162,7 +176,7 @@ pub fn if_app_config_does_not_exist_create_default(_app: &mut App, config_name: 
     };
     let json_data: Value = serde_json::from_str(default_config).unwrap();
 
-    if let Err(err) = write_app_config(config_name, json_data) {
+    if let Err(err) = write_app_config(app.clone(), config_name, json_data) {
         error!("Could not create default config file '{config_name}': {err}");
         return;
     }
@@ -172,7 +186,7 @@ pub fn if_app_config_does_not_exist_create_default(_app: &mut App, config_name: 
 
 #[cfg(test)]
 mod tests {
-    use super::{is_allowed_asset_path, is_allowed_config_path};
+    use super::{is_allowed_asset_path, is_allowed_config_path, relative_to_app_root};
     use std::path::Path;
 
     #[test]
@@ -198,5 +212,18 @@ mod tests {
         assert!(!is_allowed_asset_path(Path::new(
             "assets/nested/warple.png"
         )));
+    }
+
+    #[test]
+    fn absolute_paths_must_stay_under_the_resolved_app_root() {
+        let root = std::env::temp_dir().join("warple-config-root");
+        let allowed = root.join("assets").join("warple.png");
+        let outside = std::env::temp_dir().join("outside").join("warple.png");
+
+        assert_eq!(
+            relative_to_app_root(&root, allowed.to_str().unwrap()).unwrap(),
+            Path::new("assets").join("warple.png")
+        );
+        assert!(relative_to_app_root(&root, outside.to_str().unwrap()).is_err());
     }
 }

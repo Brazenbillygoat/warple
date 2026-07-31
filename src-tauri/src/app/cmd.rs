@@ -1,6 +1,7 @@
 use log::{error, info};
 use mouse_position::mouse_position::Mouse;
 use serde_json::json;
+use tauri::AppHandle;
 
 use super::conf::app_root;
 
@@ -24,8 +25,14 @@ pub fn get_mouse_position() -> serde_json::Value {
 }
 
 #[tauri::command]
-pub fn open_config_folder() {
-    let path = app_root();
+pub fn open_config_folder(app: AppHandle) {
+    let path = match app_root(&app) {
+        Ok(path) => path,
+        Err(err) => {
+            error!("{err}");
+            return;
+        }
+    };
     match open::that(&path) {
         Ok(()) => info!("Open config folder: {}", path.display()),
         Err(err) => error!(

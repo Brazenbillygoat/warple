@@ -10,14 +10,14 @@ use tauri_plugin_dialog::DialogExt;
 fn show_message(app: &AppHandle, message: &str) {
     app.dialog()
         .message(message)
-        .title("WindowPet Dialog")
+        .title("Warple Dialog")
         .show(|_| {});
 }
 
 fn open_or_focus_setting_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("setting") {
         let _ = window.set_focus();
-        show_message(app, "WindowPet setting already exists");
+        show_message(app, "Warple settings already exist");
     } else {
         open_setting_window(app.clone());
     }
@@ -44,11 +44,11 @@ fn handle_tray_menu_event(app: &AppHandle, id: &str) {
         },
         "setting" => open_or_focus_setting_window(app),
         "restart" => {
-            info!("Restart WindowPet");
+            info!("Restart Warple");
             app.restart();
         }
         "quit" => {
-            info!("Quit WindowPet");
+            info!("Quit Warple");
             app.exit(0);
         }
         _ => {}

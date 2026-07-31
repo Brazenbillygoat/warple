@@ -16,7 +16,7 @@ pub async fn reopen_main_window(app: tauri::AppHandle) -> Result<(), String> {
         .resizable(false)
         .transparent(true)
         .always_on_top(true)
-        .title("WindowPet")
+        .title("Warple")
         .skip_taskbar(true)
         .build()
         .map_err(|e| e.to_string())?;
@@ -31,9 +31,9 @@ pub async fn reopen_main_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 pub fn open_setting_window(app: tauri::AppHandle) {
-    let settings = AppConfig::new();
+    let settings = AppConfig::new(&app);
     let _window = WebviewWindowBuilder::new(&app, "setting", WebviewUrl::App("/setting".into()))
-        .title("WindowPet Setting")
+        .title("Warple Settings")
         .inner_size(1000.0, 650.0)
         .theme(if settings.get_theme() == "dark" {
             Some(tauri::Theme::Dark)

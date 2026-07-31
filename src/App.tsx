@@ -20,7 +20,7 @@ function App() {
 
   if (isError) {
     confirm(`Error: ${error.message}`, {
-      title: 'WindowPet Dialog',
+      title: 'Warple Dialog',
       kind: 'error',
     }).then((ok) => {
       if (ok !== undefined) {
