@@ -71,6 +71,8 @@ npm run tauri -- build --debug
 
 The last command builds the desktop application and installers without launching Warple.
 
+Dependency work is kept in small, reviewable slices. See the [migration roadmap](docs/MIGRATION_ROADMAP.md) for the current order, risk, and reasoning.
+
 ## ✨ How it fits together
 
 ```text
