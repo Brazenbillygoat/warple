@@ -1,13 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import tsconfigPaths from "vite-tsconfig-paths";
 import checker from "vite-plugin-checker";
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
     plugins: [
         react(),
-        tsconfigPaths(),
         checker({
             // e.g. use TypeScript check
             typescript: true,
@@ -30,14 +28,9 @@ export default defineConfig(async () => ({
         target:
             process.env.TAURI_PLATFORM == "windows" ? "chrome105" : "safari13",
         // don't minify for debug builds
-        minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
+        minify: !process.env.TAURI_DEBUG,
         // produce sourcemaps for debug builds
         sourcemap: !!process.env.TAURI_DEBUG,
-    },
-    esbuild: {
-        supported: {
-            "top-level-await": true, //browsers can handle top-level-await features
-        },
     },
     // vitest need to configure it to use a browser environment and not a node one: https://vitest.dev/config/#environment
     // https://github.com/wobsoriano/vitest-canvas-mock

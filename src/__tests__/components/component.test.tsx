@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
-import { QueryClient, QueryClientProvider } from "react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SettingWindow from "../../SettingWindow";
 import i18next from "../../i18next";
 

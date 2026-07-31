@@ -1,4 +1,4 @@
-import { useQuery } from "react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSettingStore } from "./useSettingStore";
 import { getAppSettings } from "../utils/settings";
 import i18next from "i18next";
@@ -24,11 +24,12 @@ const getSettings = async () => {
     setAllowPetClimbing(setting.allowPetClimbing ?? defaultSettings.allowPetClimbing);
     setAllowOverridePetScale(setting.allowOverridePetScale ?? defaultSettings.allowOverridePetScale);
     setPetScale(setting.petScale ?? defaultSettings.petScale);
+    return setting;
 };
 
 export function useSettings() {
-    return useQuery('settings', getSettings, { refetchOnWindowFocus: false,
+    return useQuery({ queryKey: ['settings'], queryFn: getSettings, refetchOnWindowFocus: false,
         // disable cache
-        cacheTime: 0,
+        gcTime: 0,
      });
 }

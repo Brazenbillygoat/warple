@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local repository guidance and active planning
+/AGENTS.md
+/docs/PROJECT_CONTEXT.md
+/docs/ACTIVE_PLAN.md
