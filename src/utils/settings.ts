@@ -1,7 +1,6 @@
-import { Store } from "@tauri-apps/plugin-store";
 import { DefaultConfigName, IGetAppSetting } from "../types/ISetting";
 import { invoke } from '@tauri-apps/api/core'
-import { readTextFile, exists, copyFile, BaseDirectory, mkdir } from "@tauri-apps/plugin-fs"
+import { copyFile, BaseDirectory, mkdir } from "@tauri-apps/plugin-fs"
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { IPetObject } from "../types/ISpriteConfig";
 import { showNotification } from "./notification";
@@ -10,18 +9,16 @@ import { error, info } from "@tauri-apps/plugin-log";
 
 // default will return app settings, if key is provided, will return specific key
 export async function getAppSettings({ configName = "settings.json", key = "app", withErrorDialog = true }: IGetAppSetting) {
-    const configPath: string = await invoke("combine_config_path", { config_name: configName });
-    const configExists = await exists(configPath);
+    if (key !== "app") throw new Error(`Unsupported config key: ${key}`);
 
-    if (!configExists) {
-        if (withErrorDialog) await confirm(`Could not get data from ${configPath}`, { title: "WindowPet Dialog", kind: 'error' });
+    const data = await invoke<any | null>("read_app_config", { config_name: configName });
+    if (data === null) {
+        if (withErrorDialog) await confirm(`Could not get data from ${configName}`, { title: "WindowPet Dialog", kind: 'error' });
 
         return;
     }
 
-    const data = await readTextFile(configPath);
-    const json = JSON.parse(data);
-    return json[key];
+    return data;
 }
 
 // set a specific key under object app
@@ -30,75 +27,44 @@ interface ISetSetting extends IGetAppSetting {
     setKey: string,
     newValue: unknown,
 }
-export function setSettings({ configName = "settings.json", key = "app", setKey, newValue }: ISetSetting) {
-    (async () => {
-        let setting: any = await getAppSettings({ configName });
-        setting[setKey] = newValue;
-        const configPath: string = await invoke("combine_config_path", { config_name: configName });
-        // if not exist, create new file, so we don't need to check if file exists
-        const store = await Store.load(configPath);
-        await store.set(key, setting);
-        await store.save();
-    })()
+export async function setSettings({ configName = "settings.json", key = "app", setKey, newValue }: ISetSetting) {
+    if (key !== "app") throw new Error(`Unsupported config key: ${key}`);
+
+    const setting: any = await getAppSettings({ configName });
+    setting[setKey] = newValue;
+    await invoke("write_app_config", { config_name: configName, value: setting });
 }
 
 // this function differs from setSettings because it will replace the whole config file, not just some specific key
 export interface ISetConfig extends IGetAppSetting {
     newConfig: unknown,
 }
-export function setConfig({ configName = "settings.json", key = "app", newConfig }: ISetConfig) {
-    (async () => {
-        const configPath: string = await invoke("combine_config_path", { config_name: configName });
-        // if not exist, create new file, so we don't need to check if file exists
-        const store = await Store.load(configPath);
-        await store.set(key, newConfig);
-        await store.save();
-    })()
-}
-
-export async function getNoneExistingConfigFileName({ configName, extension, folderName }: { configName: string, extension: string, folderName?: string }) {
-    // if file name doesn't exist, return the same name
-    // else generate a new name with -1, -2, -3, etc
-    const configPath: string = await invoke("combine_config_path", { config_name: `${folderName}${configName}${extension}` });
-    const configExists = await exists(configPath);
-    if (!configExists) return configName;
-
-    let i = 1;
-
-    while (configExists) {
-        const newConfigName = `${configName}-${i}`;
-        const newConfigPath: string = await invoke("combine_config_path", { config_name: `${folderName}${newConfigName}${extension}` });
-        const newConfigExists = await exists(newConfigPath);
-        if (!newConfigExists) return newConfigName;
-        i++;
-    }
+export async function setConfig({ configName = "settings.json", key = "app", newConfig }: ISetConfig) {
+    if (key !== "app") throw new Error(`Unsupported config key: ${key}`);
+    await invoke("write_app_config", { config_name: configName, value: newConfig });
 }
 
 async function updateCustomPetConfig(newCustomPetPath: string) {
-    const customPetConfigPath: string = await invoke("combine_config_path", { config_name: DefaultConfigName.PET_LINKER });
-    if (await exists(customPetConfigPath)) {
+    const customPetConfig = await getAppSettings({
+        configName: DefaultConfigName.PET_LINKER,
+        withErrorDialog: false,
+    });
 
-        const customPetConfig = await getAppSettings({ configName: DefaultConfigName.PET_LINKER });
-
-        if (customPetConfig) {
-            customPetConfig.push(newCustomPetPath);
-            setConfig({ configName: DefaultConfigName.PET_LINKER, newConfig: customPetConfig });
-            return;
-        }
+    if (Array.isArray(customPetConfig)) {
+        customPetConfig.push(newCustomPetPath);
+        await setConfig({ configName: DefaultConfigName.PET_LINKER, newConfig: customPetConfig });
+        return;
     }
 
-    setConfig({ configName: DefaultConfigName.PET_LINKER, newConfig: [newCustomPetPath] });
+    await setConfig({ configName: DefaultConfigName.PET_LINKER, newConfig: [newCustomPetPath] });
 }
 
 export async function saveCustomPet(petObject: IPetObject) {
     try {
         info(`Start saving custom pet, pet name: ${petObject.name}`);
         petObject.customId = crypto.randomUUID();
-        const uniquePetFileName = await getNoneExistingConfigFileName({
-            configName: petObject.name as string,
-            folderName: "custom-pets/",
-            extension: ".json"
-        });
+        const uniquePetFileName = `pet-${petObject.customId}`;
+        const customPetConfigName = `custom-pets/${uniquePetFileName}.json`;
         const userImageSrc = petObject.imageSrc as string;
         petObject.imageSrc = await invoke("combine_config_path", { config_name: `assets/${uniquePetFileName}.png` }) as string;
 
@@ -106,10 +72,10 @@ export async function saveCustomPet(petObject: IPetObject) {
         await mkdir('assets', { baseDir: BaseDirectory.AppConfig, recursive: true });
         await copyFile(userImageSrc, petObject.imageSrc);
 
-        setConfig({ configName: `custom-pets/${uniquePetFileName}.json`, newConfig: petObject });
+        await setConfig({ configName: customPetConfigName, newConfig: petObject });
 
         // this config is the one that will be used to load custom pets (act as a list of custom pets)
-        await updateCustomPetConfig(await invoke("combine_config_path", { config_name: `custom-pets/${uniquePetFileName}.json` }));
+        await updateCustomPetConfig(customPetConfigName);
 
         showNotification({
             title: i18next.t("Custom Pet Added"),

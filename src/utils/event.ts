@@ -12,7 +12,7 @@ export const emitUpdatePetsEvent = async ({dispatchType, newValue}: IEmitReRende
     const mainWindow = await WebviewWindow.getByLabel('main');
 
     if (mainWindow) {
-        await mainWindow.emit(EventType.SettingWindowToPetOverlay, {
+        await mainWindow.emitTo('main', EventType.SettingWindowToPetOverlay, {
             message: 'Hey, re-render pets! :)',
             dispatchType: dispatchType,
             value: newValue

@@ -1,0 +1,39 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-window",
+  "description": "Settings may manage Warple data and import a PNG explicitly selected by the user.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": ["setting"],
+  "permissions": [
+    "core:app:allow-version",
+    "core:event:allow-emit-to",
+    "core:path:allow-is-absolute",
+    "core:window:allow-get-all-windows",
+    "dialog:allow-message",
+    "dialog:allow-open",
+    "fs:allow-copy-file",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:deny-default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPCONFIG/assets" },
+        { "path": "$APPCONFIG/assets/**/*" }
+      ]
+    },
+    "log:allow-log",
+    "settings-management",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://github.com/SeakMengs" },
+        { "url": "https://github.com/SeakMengs/WindowPet" },
+        { "url": "https://github.com/SeakMengs/WindowPet/issues" },
+        { "url": "https://github.com/SeakMengs/WindowPet/discussions" },
+        { "url": "https://github.com/SeakMengs/WindowPet/releases/tag/v*" },
+        { "url": "https://www.buymeacoffee.com/seakmeng" }
+      ]
+    }
+  ]
+}

@@ -24,7 +24,6 @@ fn build_app() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .clear_targets()
@@ -54,10 +53,11 @@ fn build_app() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            conf::convert_path,
             conf::combine_config_path,
+            conf::read_app_config,
+            conf::write_app_config,
             cmd::get_mouse_position,
-            cmd::open_folder,
+            cmd::open_config_folder,
             utils::reopen_main_window,
         ])
         .build(tauri::generate_context!())

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-pet-window",
+  "description": "Minimum permissions required by the desktop pet overlay.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close",
+    "core:window:allow-set-ignore-cursor-events",
+    "dialog:allow-message",
+    "log:allow-log",
+    "pet-runtime"
+  ]
+}

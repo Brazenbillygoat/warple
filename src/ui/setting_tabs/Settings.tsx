@@ -57,8 +57,7 @@ function Settings() {
     })
 
     const openConfigFolder = useCallback(async () => {
-        const configPath: string = await invoke("combine_config_path", { config_name: "" });
-        await invoke("open_folder", { path: configPath });
+        await invoke("open_config_folder");
     }, []);
 
     return (

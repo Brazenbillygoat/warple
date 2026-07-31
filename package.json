@@ -21,7 +21,6 @@
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-log": "^2.9.0",
     "@tauri-apps/plugin-opener": "^2.5.4",
-    "@tauri-apps/plugin-store": "^2.4.4",
     "clsx": "^2.1.1",
     "i18next": "^23.11.5",
     "jsdom": "^24.0.0",

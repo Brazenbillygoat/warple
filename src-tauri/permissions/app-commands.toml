@@ -1,0 +1,15 @@
+[[permission]]
+identifier = "pet-runtime"
+description = "Allows the pet overlay to read Warple configuration and observe the cursor position."
+commands.allow = ["read_app_config", "get_mouse_position"]
+
+[[permission]]
+identifier = "settings-management"
+description = "Allows the settings window to manage only validated Warple data paths and reopen the pet overlay."
+commands.allow = [
+  "combine_config_path",
+  "open_config_folder",
+  "read_app_config",
+  "reopen_main_window",
+  "write_app_config",
+]

@@ -2,6 +2,8 @@ use log::{error, info};
 use mouse_position::mouse_position::Mouse;
 use serde_json::json;
 
+use super::conf::app_root;
+
 #[tauri::command]
 pub fn get_mouse_position() -> serde_json::Value {
     /*
@@ -25,9 +27,14 @@ pub fn get_mouse_position() -> serde_json::Value {
 }
 
 #[tauri::command]
-pub fn open_folder(path: &str) {
-    match open::that(path) {
-        Ok(()) => info!("Open folder: {}", path),
-        Err(err) => error!("An error occurred when opening '{}': {}", path, err),
+pub fn open_config_folder() {
+    let path = app_root();
+    match open::that(&path) {
+        Ok(()) => info!("Open config folder: {}", path.display()),
+        Err(err) => error!(
+            "An error occurred when opening '{}': {}",
+            path.display(),
+            err
+        ),
     }
 }

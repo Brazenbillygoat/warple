@@ -1,4 +1,4 @@
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { confirm } from "@tauri-apps/plugin-dialog";
 import i18next from 'i18next';
 import { error } from "@tauri-apps/plugin-log";
@@ -13,8 +13,7 @@ export const noPetDialog = () => {
     error("No pet found");
     confirm(i18next.t("Nya~ Oh, dear friend! In this whimsical realm of mine, where magic and wonder intertwine, alas, there are no delightful pets to be found. But fret not! Fear not! For you hold the power to change this tale. Simply venture into the enchanting settings and add a touch of furry companionship to make our world even more adorable and divine! Onegai~"), { title: "WindowPet Dialog", kind: 'info' }).then(async () => {
         // close the pet window
-        const mainWindow = await WebviewWindow.getByLabel('main');
-        await mainWindow?.close();
+        await getCurrentWebviewWindow().close();
     });
 }
 
