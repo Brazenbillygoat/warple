@@ -11,6 +11,11 @@ vi.mock("../../ui/components/PhaserCanvas", () => ({
     default: () => null,
 }));
 
+vi.mock("../../hooks/usePets", () => ({
+    usePets: () => ({ data: [], refetch: vi.fn() }),
+    useDefaultPets: () => ({ data: [], refetch: vi.fn() }),
+}));
+
 afterEach(() => {
     cleanup();
 });

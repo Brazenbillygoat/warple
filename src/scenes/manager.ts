@@ -1,7 +1,8 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/tauri";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { ISpriteConfig, SpriteType } from "../types/ISpriteConfig";
-import { appWindow } from "@tauri-apps/api/window";
-import { error } from "tauri-plugin-log-api";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { error } from "@tauri-apps/plugin-log";
+const appWindow = getCurrentWebviewWindow()
 
 export class ConfigManager {
     // Config for sprite sheet that's going to be loaded

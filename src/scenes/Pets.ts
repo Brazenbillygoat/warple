@@ -12,7 +12,7 @@ import {
     ISwitchStateOptions,
     Ease,
 } from "../types/IPet";
-import { info, error } from "tauri-plugin-log-api";
+import { info, error } from "@tauri-apps/plugin-log";
 import defaultSettings from "../../src-tauri/src/app/default/settings.json";
 import { ConfigManager, InputManager } from "./manager";
 
@@ -248,9 +248,9 @@ export default class Pets extends Phaser.Scene {
         );
 
         // listen to setting change from setting window and update settings
-        listen<any>(
+        listen<TRenderEventListener["payload"]>(
             EventType.SettingWindowToPetOverlay,
-            (event: TRenderEventListener) => {
+            (event) => {
                 switch (event.payload.dispatchType) {
                     case DispatchType.SwitchAllowPetInteraction:
                         this.allowPetInteraction = event.payload

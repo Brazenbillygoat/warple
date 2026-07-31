@@ -18,10 +18,6 @@ export const useSettingStore = create<ISettingStoreState>()((set) => ({
     setAllowPetAboveTaskbar: (newBoolean) => {
         set({ allowPetAboveTaskbar: newBoolean })
     },
-    allowAutoStartUp: defaultSettings.allowAutoStartUp ?? false,
-    setAllowAutoStartUp: (newBoolean) => {
-        set({ allowAutoStartUp: newBoolean })
-    },
     allowPetInteraction: defaultSettings.allowPetInteraction ?? true,
     setAllowPetInteraction: (newBoolean) => {
         set({ allowPetInteraction: newBoolean })

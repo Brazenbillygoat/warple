@@ -2,58 +2,41 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist",
-    "withGlobalTauri": false
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
   },
-  "package": {
-    "productName": "WindowPet",
-    "version": "0.0.9"
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "copyright": "Copyright (c) 2023 Seakmeng"
   },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "window": {
-        "all": true
-      },
-      "shell": {
-        "all": false,
-        "open": true
-      },
-      "fs": {
-        "all": true,
-        "scope": {
-          "allow": ["**"],
-          "requireLiteralLeadingDot": false
-        }
-      },
-      "protocol": {
-        "asset": true,
-        "assetScope": ["**"]
-      },
-      "path": {
-        "all": true
-      },
-      "dialog": {
-        "all": true
-      }
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "WindowPet",
-      "category": "Productivity",
-      "copyright": "Copyright (c) 2023 Seakmeng",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ]
-    },
+  "productName": "WindowPet",
+  "mainBinaryName": "WindowPet",
+  "version": "0.0.9",
+  "identifier": "WindowPet",
+  "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
+    }
+  },
+  "app": {
+    "withGlobalTauri": false,
     "security": {
-      "csp": "asset: https://asset.localhost"
+      "assetProtocol": {
+        "scope": [
+          "**"
+        ],
+        "enable": true
+      },
+      "csp": "asset: https://asset.localhost; connect-src ipc: http://ipc.localhost"
     },
     "windows": [
       {
@@ -64,13 +47,10 @@
         "height": 64,
         "transparent": true,
         "alwaysOnTop": true,
-        "skipTaskbar": true
+        "skipTaskbar": true,
+        "useHttpsScheme": true
       }
     ],
-    "systemTray": {
-      "iconPath": "icons/32x32.png",
-      "iconAsTemplate": true
-    },
     "macOSPrivateApi": true
   }
 }

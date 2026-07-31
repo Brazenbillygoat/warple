@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { Anchor, Avatar, Flex, Text } from "@mantine/core";
-import { open } from "@tauri-apps/api/shell";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from '@tauri-apps/api/app';
 import { useTranslation } from "react-i18next";
 
@@ -66,14 +66,14 @@ function About() {
             />
             <Text fw={700}>WindowPet</Text>
             <Text display={"flex"}>{t("Version", { version: appVersion })}
-                <Anchor mx={"xs"} onClick={() => open(`https://github.com/SeakMengs/WindowPet/releases/tag/v${appVersion}`)}>{t("(release note)")}</Anchor>
+                <Anchor mx={"xs"} onClick={() => openUrl(`https://github.com/SeakMengs/WindowPet/releases/tag/v${appVersion}`)}>{t("(release note)")}</Anchor>
             </Text>
             <Text color="dimmed">Updates are disabled for this development baseline.</Text>
             {
                 titleAndLinks.map((item, index) => (
                     <Text key={`titleAndLinks-${index}`} display={"flex"}>
                         {item.title}
-                        <Anchor mx={"xs"} onClick={() => open(item.link.url)}>{item.link.label}</Anchor>
+                        <Anchor mx={"xs"} onClick={() => openUrl(item.link.url)}>{item.link.label}</Anchor>
                     </Text>
                 ))
             }

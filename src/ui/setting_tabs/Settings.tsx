@@ -7,7 +7,7 @@ import { handleSettingChange } from "../../utils/handleSettingChange";
 import { useSettingStore } from "../../hooks/useSettingStore";
 import { memo, useCallback } from "react";
 import { IconLanguage } from "@tabler/icons-react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import SettingButton from "./settings/SettingButton";
 import { DispatchType } from "../../types/IEvents";
 
@@ -21,15 +21,9 @@ interface ISettingsContent {
 
 function Settings() {
     const { t, i18n } = useTranslation();
-    const { allowAutoStartUp, allowPetAboveTaskbar, allowPetInteraction, allowOverridePetScale, petScale, allowPetClimbing } = useSettingStore();
+    const { allowPetAboveTaskbar, allowPetInteraction, allowOverridePetScale, petScale, allowPetClimbing } = useSettingStore();
 
     const settingSwitches: ISettingsContent[] = [
-        {
-            title: t("Auto start-up"),
-            description: t("Automatically open WindowPet every time u start the computer"),
-            checked: allowAutoStartUp,
-            dispatchType: DispatchType.SwitchAutoWindowStartUp,
-        },
         {
             title: t("Pet above taskbar"),
             description: t("Make the pet float above taskbar (For Window User)"),

@@ -1,9 +1,9 @@
-import { setSettings, toggleAutoStartUp } from "./settings";
+import { setSettings } from "./settings";
 import { ColorScheme } from "../types/ISetting";
 import { useSettingStore } from "../hooks/useSettingStore";
 import { emitUpdatePetsEvent } from "./event";
 import i18next from "i18next";
-import { info } from "tauri-plugin-log-api";
+import { info } from "@tauri-apps/plugin-log";
 import { DispatchType } from "../types/IEvents";
 import { ISpriteConfig } from "../types/ISpriteConfig";
 
@@ -20,7 +20,6 @@ export const handleSettingChange: IHandleSettingChange = (
     const {
         setLanguage,
         setTheme,
-        setAllowAutoStartUp,
         setAllowPetAboveTaskbar,
         setAllowPetInteraction,
         setAllowOverridePetScale,
@@ -41,11 +40,6 @@ export const handleSettingChange: IHandleSettingChange = (
             setSettings({ setKey: "theme", newValue: newValue });
             setTheme(newValue as ColorScheme);
             localStorage.setItem("theme", newValue as string);
-            return;
-        case DispatchType.SwitchAutoWindowStartUp:
-            // auto start up doesn't need to be saved in settings.json
-            toggleAutoStartUp(newValue as boolean);
-            setAllowAutoStartUp(newValue as boolean);
             return;
         case DispatchType.SwitchPetAboveTaskbar:
             setSettings({ setKey: "allowPetAboveTaskbar", newValue: newValue });

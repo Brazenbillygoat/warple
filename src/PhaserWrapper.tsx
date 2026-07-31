@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import Phaser from "phaser";
 import Pets from "./scenes/Pets";
 import { useSettingStore } from "./hooks/useSettingStore";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+const appWindow = getCurrentWebviewWindow()
 
 function PhaserWrapper() {
     const phaserDom = useRef<HTMLDivElement>(null);

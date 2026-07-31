@@ -4,7 +4,6 @@
     "allowPetAboveTaskbar": false,
     "allowPetInteraction": true,
     "allowPetClimbing": true,
-    "allowAutoStartUp": false,
     "allowOverridePetScale": true,
     "petScale": 0.7
 }

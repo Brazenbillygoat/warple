@@ -54,7 +54,7 @@ pub fn convert_path(path_str: &str) -> Option<String> {
 }
 
 pub fn app_root() -> PathBuf {
-    tauri::api::path::config_dir().unwrap().join("WindowPet")
+    dirs::config_dir().unwrap().join("WindowPet")
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -71,14 +71,12 @@ pub fn if_app_config_does_not_exist_create_default(app: &mut App, config_name: &
             _ => return,
         };
         let json_data: serde_json::Value = serde_json::from_str(default_config).unwrap();
-        let mut store = StoreBuilder::new(app.handle(), PathBuf::from(setting_path)).build();
+        let store = StoreBuilder::new(app, PathBuf::from(setting_path))
+            .build()
+            .unwrap();
 
-        // note that values must be serd_json::Value to be compatible with JS
-        store
-            .insert("app".to_string(), json!(json_data))
-            .unwrap_or_else(|err| {
-                println!("Error inserting into store: {}", err);
-            });
+        // Values must be serde_json::Value to be compatible with JavaScript.
+        store.set("app", json!(json_data));
         store.save().unwrap();
         info!("Create default config file: {}", config_name);
     }

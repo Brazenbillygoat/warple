@@ -5,7 +5,6 @@ export interface ISettingStoreVariables {
     language: string;
     theme: ColorScheme;
     allowPetAboveTaskbar: boolean;
-    allowAutoStartUp: boolean;
     allowPetInteraction: boolean;
     allowPetClimbing: boolean;
     allowOverridePetScale: boolean;
@@ -18,7 +17,6 @@ export interface ISettingStoreState extends ISettingStoreVariables{
     setLanguage: (newLanguage: string) => void;
     setTheme: (newTheme: ColorScheme) => void;
     setAllowPetAboveTaskbar: (newBoolean: boolean) => void;
-    setAllowAutoStartUp: (newBoolean: boolean) => void;
     setAllowPetInteraction: (newBoolean: boolean) => void;
     setAllowPetClimbing: (newBoolean: boolean) => void;
     setAllowOverridePetScale: (newBoolean: boolean) => void;

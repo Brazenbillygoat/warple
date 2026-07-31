@@ -2,12 +2,13 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import React, { Suspense } from "react";
 import Loading from "./Loading";
 import { useSettings } from "./hooks/useSettings";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useDefaultPets, usePets } from "./hooks/usePets";
-import { confirm } from "@tauri-apps/api/dialog";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { MantineProvider } from "@mantine/core";
 import { PrimaryColor } from "./utils";
 import { ColorSchemeType } from "./types/ISetting";
+const appWindow = getCurrentWebviewWindow()
 
 const PhaserWrapper = React.lazy(() => import("./PhaserWrapper"));
 const SettingWindow = React.lazy(() => import("./SettingWindow"));
@@ -20,7 +21,7 @@ function App() {
   if (isError) {
     confirm(`Error: ${error.message}`, {
       title: 'WindowPet Dialog',
-      type: 'error',
+      kind: 'error',
     }).then((ok) => {
       if (ok !== undefined) {
         appWindow.close();

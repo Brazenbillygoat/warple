@@ -1,97 +1,94 @@
 use super::utils::{open_setting_window, reopen_main_window};
 use log::info;
 use tauri::{
-    AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
-    SystemTrayMenuItem,
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    App, AppHandle, Manager,
 };
+use tauri_plugin_dialog::DialogExt;
 
-pub fn init_system_tray() -> SystemTray {
-    let menu = SystemTrayMenu::new()
-        .add_item(CustomMenuItem::new("show".to_string(), "Show"))
-        .add_item(CustomMenuItem::new(
-            "pause".to_string(),
-            "Pause (Free Memory)",
-        ))
-        .add_item(CustomMenuItem::new("setting".to_string(), "Setting"))
-        .add_native_item(SystemTrayMenuItem::Separator)
-        .add_item(CustomMenuItem::new("restart".to_string(), "Restart"))
-        .add_item(CustomMenuItem::new("quit".to_string(), "Quit"));
-
-    SystemTray::new().with_menu(menu)
+fn show_message(app: &AppHandle, message: &str) {
+    app.dialog()
+        .message(message)
+        .title("WindowPet Dialog")
+        .show(|_| {});
 }
 
-pub fn handle_tray_event(app: &AppHandle, event: SystemTrayEvent) {
-    if let SystemTrayEvent::MenuItemClick { id, .. } = event {
-        match id.as_str() {
-            "show" => {
-                match app.get_window("main") {
-                    Some(window) => {
-                        println!("Window already exists");
-                        tauri::api::dialog::message(
-                            Some(&window),
-                            "WindowPet Dialog",
-                            "Pet already exist",
-                        );
-                    }
-                    None => {
-                        // use tokio to run the future to avoid blocking the thread
-                        let future = async { reopen_main_window(app.clone()).await };
-                        // run the future using an executor and handle the result
-                        let _result_ = tokio::runtime::Runtime::new().unwrap().block_on(future);
-                    }
-                };
-            }
-            "pause" => {
-                match app.get_window("main") {
-                    Some(window) => {
-                        window.close().expect("failed to close frontend window");
-                    }
-                    None => {
-                        println!("Window not found");
-                    }
-                };
-            }
-            "setting" => match app.get_window("setting") {
-                Some(window) => {
-                    tauri::api::dialog::message(
-                        Some(&window),
-                        "WindowPet Dialog",
-                        "WindowPet setting already exist",
-                    );
-                    println!("Window setting already exist");
-                }
-                None => {
-                    open_setting_window(app.clone());
-                }
-            },
-            "restart" => {
-                info!("Restart WindowPet");
-                app.restart();
-            }
-            "quit" => {
-                info!("Quit WindowPet");
-                app.exit(0);
-            }
-            _ => {}
-        }
-    } else if let SystemTrayEvent::DoubleClick {
-        position: _,
-        size: _,
-        ..
-    } = event
-    {
-        match app.get_window("setting") {
+fn open_or_focus_setting_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("setting") {
+        let _ = window.set_focus();
+        show_message(app, "WindowPet setting already exists");
+    } else {
+        open_setting_window(app.clone());
+    }
+}
+
+fn handle_tray_menu_event(app: &AppHandle, id: &str) {
+    match id {
+        "show" => match app.get_webview_window("main") {
             Some(window) => {
-                tauri::api::dialog::message(
-                    Some(&window),
-                    "WindowPet Dialog",
-                    "WindowPet setting already exist",
-                );
-                println!("Window setting already exists");
+                let _ = window.set_focus();
+                show_message(app, "Pet already exists");
             }
             None => {
-                open_setting_window(app.clone());
+                tauri::async_runtime::spawn(reopen_main_window(app.clone()));
             }
+        },
+        "pause" => match app.get_webview_window("main") {
+            Some(window) => {
+                window.close().expect("failed to close frontend window");
+            }
+            None => {
+                println!("Window not found");
+            }
+        },
+        "setting" => open_or_focus_setting_window(app),
+        "restart" => {
+            info!("Restart WindowPet");
+            app.restart();
         }
+        "quit" => {
+            info!("Quit WindowPet");
+            app.exit(0);
+        }
+        _ => {}
     }
+}
+
+pub fn init_system_tray(app: &mut App) -> tauri::Result<()> {
+    let show = MenuItemBuilder::with_id("show", "Show").build(app)?;
+    let pause = MenuItemBuilder::with_id("pause", "Pause (Free Memory)").build(app)?;
+    let setting = MenuItemBuilder::with_id("setting", "Setting").build(app)?;
+    let restart = MenuItemBuilder::with_id("restart", "Restart").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+
+    let menu = MenuBuilder::new(app)
+        .item(&show)
+        .item(&pause)
+        .item(&setting)
+        .separator()
+        .item(&restart)
+        .item(&quit)
+        .build()?;
+
+    let mut tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| handle_tray_menu_event(app, event.id().as_ref()))
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                open_or_focus_setting_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+
+    tray.build(app)?;
+    Ok(())
 }
