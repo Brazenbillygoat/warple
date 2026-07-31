@@ -1,6 +1,6 @@
 import { Box } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { ESettingTab } from "../../../types/ISetting";
 import { useSettingStore } from "../../../hooks/useSettingStore";
 import classes from "./AddCard.module.css";

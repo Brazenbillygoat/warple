@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router";
 import React, { Suspense } from "react";
 import Loading from "./Loading";
 import { useSettings } from "./hooks/useSettings";

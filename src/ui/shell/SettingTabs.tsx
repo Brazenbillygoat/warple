@@ -2,7 +2,7 @@ import SettingTab from './SettingTab';
 import { memo, useCallback } from 'react';
 import { ISettingTabsProps } from '../../types/components/type';
 import { useSettingTabStore } from '../../hooks/useSettingTabStore';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 function SettingTabs({ activeTab, settingTabs }: ISettingTabsProps) {
   const [searchParams, setSearchParams] = useSearchParams();

@@ -6,26 +6,19 @@ Warple is being modernized in small slices so dependency changes stay understand
 
 | Order | Migration | Why | Risk | Urgency |
 | --- | --- | --- | --- | --- |
-| 1 | React 19, React Router 8, Testing Library 16, and Tabler Icons 3 | Removes the current React Router security advisory and satisfies the related peer requirements | Medium | Soon |
-| 2 | WindowPet identifiers and user data to Warple | Finishes the product rename without abandoning existing settings or custom pets | High | Before the installed user base grows |
-| 3 | Mantine 7 to 9 | Brings the settings UI onto the current major version | High | Later |
-| 4 | Zustand, i18next, react-i18next, and other small libraries | Reduces routine dependency drift | Low to medium | Opportunistic |
-| 5 | TypeScript 7 and Rust edition 2024 | Modernizes compiler and language baselines | Medium | Later |
-| 6 | Phaser 3 to 4 | Moves the behavior and physics engine to its next major generation | Very high | Last, after stronger behavior tests |
+| 1 | WindowPet identifiers and user data to Warple | Finishes the product rename without abandoning existing settings or custom pets | High | Before the installed user base grows |
+| 2 | Mantine 7 to 9 | Brings the settings UI onto the current major version | High | Later |
+| 3 | Zustand, i18next, react-i18next, and other small libraries | Reduces routine dependency drift | Low to medium | Opportunistic |
+| 4 | TypeScript 7 and Rust edition 2024 | Modernizes compiler and language baselines | Medium | Later |
+| 5 | Phaser 3 to 4 | Moves the behavior and physics engine to its next major generation | Very high | Last, after stronger behavior tests |
 
-## React Router advisory
+## Completed: React Router advisory
 
-The current advisory, [`GHSA-qwww-vcr4-c8h2`](https://github.com/advisories/GHSA-qwww-vcr4-c8h2), affects unstable React Server Component APIs included in React Router. Warple uses React Router only for client-side navigation inside Tauri. It has no React server, server actions, or RSC configuration, so the vulnerable execution path is not currently used.
+The former advisory, [`GHSA-qwww-vcr4-c8h2`](https://github.com/advisories/GHSA-qwww-vcr4-c8h2), affected unstable React Server Component APIs included in React Router. Warple uses React Router only for client-side navigation inside Tauri. It has no React server, server actions, or RSC configuration, so the vulnerable execution path was not used.
 
-The advisory is still worth removing. React Router 8.3.0 is the first patched release, but the [React Router 8 upgrade requirements](https://reactrouter.com/upgrading/v7) include React and React DOM 19.2.7 or newer. Version 8 also removes the `react-router-dom` compatibility package. Warple's Node 22.23 and Vite 8 baselines already satisfy the remaining requirements.
+The coordinated migration moved React and React DOM to 19.2.8, replaced `react-router-dom` with React Router 8.3.0, moved Testing Library to 16.3.2 with its DOM peer, and moved Tabler Icons to 3.46.0. Mantine remains on version 7. The application remains declarative and client-only, focused routing tests pass, and `npm audit` reports no vulnerabilities.
 
-That makes the first migration a coordinated compatibility slice:
-
-- Move React and React DOM to 19.2.7 or newer.
-- Replace `react-router-dom` with patched `react-router` 8 and update imports.
-- Move Testing Library to a React 19-compatible release.
-- Move Tabler Icons to version 3 because the installed version 2 package does not declare React 19 support.
-- Keep Mantine 7 during this slice because the installed Mantine packages already declare React 19 support.
+Manual desktop review remains required before the migration is merged.
 
 ## Delivery rules
 
