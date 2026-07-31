@@ -9,14 +9,12 @@ function AddCard() {
     const [searchParams, setSearchParams] = useSearchParams();
     const { theme: colorScheme } = useSettingStore();
 
+    // The enum value keeps this shortcut aligned with SettingWindow's tab definitions.
     return (
-        // tab index 1 is Pet Store
         <Box onClick={() => {
             searchParams.set('tab', ESettingTab.PetShop.toString());
             setSearchParams(searchParams);
         }}
-            // class module is used  because mantine inline style doesn't support pseudo classes
-            // https://mantine.dev/styles/styles-api/#styles-prop
             className={classes.box}
             style={(theme) => ({
                 backgroundColor: colorScheme === 'dark' ? theme.colors.dark[6] : theme.white,

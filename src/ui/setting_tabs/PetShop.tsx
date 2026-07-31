@@ -43,7 +43,7 @@ function PetShop() {
             })
         })
 
-        // update pet window to show new pet
+        // Notify the live overlay after persistence and local state agree on the new pet.
         handleSettingChange(DispatchType.AddPet, pet);
     }, [t]);
 
@@ -52,7 +52,7 @@ function PetShop() {
 
         if (!petLinker) return;
 
-        // remove custom pet from linker
+        // The linker controls which custom definitions are discovered again on reload.
         const newPetLinker = petLinker.filter((p: ISpriteConfig) => p.name === pet.name);
         setConfig({ configName: DefaultConfigName.PET_LINKER, newConfig: newPetLinker });
 

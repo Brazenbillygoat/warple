@@ -7,7 +7,7 @@ import { showNotification } from "./notification";
 import i18next from "i18next";
 import { error, info } from "@tauri-apps/plugin-log";
 
-// default will return app settings, if key is provided, will return specific key
+// Rust validates every configName before this helper can read from the app-data buckets.
 export async function getAppSettings({ configName = "settings.json", key = "app", withErrorDialog = true }: IGetAppSetting) {
     if (key !== "app") throw new Error(`Unsupported config key: ${key}`);
 
@@ -21,8 +21,6 @@ export async function getAppSettings({ configName = "settings.json", key = "app"
     return data;
 }
 
-// set a specific key under object app
-// exp: { app: { key: value } }
 interface ISetSetting extends IGetAppSetting {
     setKey: string,
     newValue: unknown,
@@ -30,12 +28,12 @@ interface ISetSetting extends IGetAppSetting {
 export async function setSettings({ configName = "settings.json", key = "app", setKey, newValue }: ISetSetting) {
     if (key !== "app") throw new Error(`Unsupported config key: ${key}`);
 
+    // Preserve sibling values because Rust writes the complete app object atomically.
     const setting: any = await getAppSettings({ configName });
     setting[setKey] = newValue;
     await invoke("write_app_config", { config_name: configName, value: setting });
 }
 
-// this function differs from setSettings because it will replace the whole config file, not just some specific key
 export interface ISetConfig extends IGetAppSetting {
     newConfig: unknown,
 }
@@ -68,13 +66,13 @@ export async function saveCustomPet(petObject: IPetObject) {
         const userImageSrc = petObject.imageSrc as string;
         petObject.imageSrc = await invoke("combine_config_path", { config_name: `assets/${uniquePetFileName}.png` }) as string;
 
-        // create dir if not exist and copy file to assets folder
+        // Copy the selected image into the only asset bucket exposed to the webview.
         await mkdir('assets', { baseDir: BaseDirectory.AppConfig, recursive: true });
         await copyFile(userImageSrc, petObject.imageSrc);
 
         await setConfig({ configName: customPetConfigName, newConfig: petObject });
 
-        // this config is the one that will be used to load custom pets (act as a list of custom pets)
+        // The linker is the discovery list for custom pet definitions on later launches.
         await updateCustomPetConfig(customPetConfigName);
 
         showNotification({

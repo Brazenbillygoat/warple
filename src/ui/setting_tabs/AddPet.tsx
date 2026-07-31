@@ -83,7 +83,7 @@ function AddPet() {
 
     const addMoreState = () => {
         const newStateArr = petInfo.states;
-        // clone the object otherwise it will use the same reference causing all state to have the same value
+        // Clone the template so editing one state never mutates the others through a shared reference.
         newStateArr.push(structuredClone(defaultStateInfo));
         setPetInfo({ ...petInfo, states: newStateArr });
     }
@@ -118,10 +118,6 @@ function AddPet() {
         }
     }
 
-    /**
-     * function can be refactor down to a shorter function 
-     * but I want to keep the code readable and easy to understand
-     */
     const validateCustomPetObject = async () => {
         let isValid = true;
         const tempPetInfo = structuredClone(petInfo);
@@ -231,7 +227,6 @@ function AddPet() {
                                     setPetInfo({ ...petInfo, states: newStateArr });
                                 }}
                             />
-                            {/* start */}
                             <NumberInput
                                 label={t("Start")}
                                 placeholder={t("Start number")}
@@ -244,7 +239,6 @@ function AddPet() {
                                     setPetInfo({ ...petInfo, states: newStateArr });
                                 }}
                             />
-                            {/* end */}
                             <NumberInput
                                 label={t("End")}
                                 placeholder={t("End number")}

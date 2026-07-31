@@ -5,6 +5,7 @@ import { useSettingStore } from "./hooks/useSettingStore";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 const appWindow = getCurrentWebviewWindow()
 
+// React owns pet data while Phaser owns rendering, and the game registry is their handoff.
 function PhaserWrapper() {
     const phaserDom = useRef<HTMLDivElement>(null);
     const { pets } = useSettingStore();
@@ -22,7 +23,7 @@ function PhaserWrapper() {
 
         window.addEventListener("resize", handleResize);
 
-        // ensure that if component remount user will still be able to touch their screen
+        // Reset click-through because Phaser may have temporarily enabled pointer input before remounting.
         appWindow.setIgnoreCursorEvents(true);
 
         const phaserConfig: Phaser.Types.Core.GameConfig = {
@@ -55,8 +56,8 @@ function PhaserWrapper() {
             },
             callbacks: {
                 preBoot: (game) => {
+                    // The Pets scene reads this snapshot during preload before creating desktop sprites.
                     game.registry.set('spriteConfig', pets);
-                    // game.registry.set('defaultPets', defaultPets);
                 }
             }
         }
@@ -64,8 +65,8 @@ function PhaserWrapper() {
         const game = new Phaser.Game(phaserConfig);
 
         return () => {
+            // Phaser owns the canvas, so destroy the game before React clears its host node.
             game.destroy(true);
-            // reset the dom
             if (phaserDom.current !== null) phaserDom.current.innerHTML = '';
             window.removeEventListener("resize", handleResize);
         }

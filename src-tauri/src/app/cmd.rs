@@ -6,10 +6,7 @@ use super::conf::app_root;
 
 #[tauri::command]
 pub fn get_mouse_position() -> serde_json::Value {
-    /*
-     * because we set the window to ignore cursor events, we cannot use
-     * javascript to get the mouse position, so we use get mouse position manually
-     */
+    // Click-through webviews cannot report pointer movement, so read the OS cursor position here.
     let position = Mouse::get_mouse_position();
     match position {
         Mouse::Position { x, y } => {

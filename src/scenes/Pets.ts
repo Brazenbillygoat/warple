@@ -24,18 +24,17 @@ interface Pet extends Phaser.Types.Physics.Arcade.SpriteWithDynamicBody {
     id: string;
 }
 
+// This is the live desktop scene; the settings preview uses the smaller Pet scene.
 export default class Pets extends Phaser.Scene {
     private pets: Pet[] = [];
     private isFlipped: boolean = false;
     private frameCount: number = 0;
-    // use this array to store index of pet that is currently climb and crawl
+    // Track climbers separately so the update loop only checks pets that need wall behavior.
     private petClimbAndCrawlIndex: number[] = [];
 
     private configManager: ConfigManager;
-    // input manager to handle mouse, toggle cursor events to ignore cursor events when mouse is over pet
     private inputManager: InputManager;
 
-    // app settings
     private allowPetInteraction: boolean;
     private allowPetAboveTaskbar: boolean;
     private allowOverridePetScale: boolean;
@@ -62,7 +61,7 @@ export default class Pets extends Phaser.Scene {
     constructor() {
         super({ key: "Pets" });
 
-        // Initialize other settings without relying on this.input
+        // Read settings here because Phaser has not created scene systems such as input yet.
         this.allowPetInteraction =
             useSettingStore.getState().allowPetInteraction ??
             defaultSettings.allowPetInteraction;
@@ -102,17 +101,13 @@ export default class Pets extends Phaser.Scene {
         this.physics.world.setBoundsCollision(true, true, true, true);
         this.updatePetAboveTaskbar();
 
-        // check all loaded sprite (debug only)
-        // console.log(this.textures.list);
-
         let i = 0;
-        // create pets
         for (const sprite of this.configManager.getSpriteConfig()) {
             this.addPet(sprite, i);
             i++;
         }
 
-        // register event
+        // Dragging temporarily hands control from Arcade physics to the pointer and a release tween.
         this.input.on(
             "drag",
             (pointer: any, pet: Pet, dragX: number, dragY: number) => {
@@ -127,11 +122,11 @@ export default class Pets extends Phaser.Scene {
                     this.switchState(pet, "drag");
                 }
 
-                // disable world bounds when dragging so that pet can go beyond screen
+                // Disable the body so world bounds do not fight pointer-controlled positioning.
                 // @ts-ignore
                 if (pet.body!.enable) pet.body!.enable = false;
 
-                // if current pet x is greater than drag start x, flip the pet to the right
+                // Face the pet toward the current drag direction.
                 if (pet.x > pet.input!.dragStartX) {
                     if (this.isFlipped) {
                         this.toggleFlipX(pet);
@@ -147,20 +142,19 @@ export default class Pets extends Phaser.Scene {
         );
 
         this.input.on("dragend", (pointer: any, pet: Pet) => {
-            // add tween effect when drag end for smooth throw effect
+            // Convert pointer velocity into a short throw before Arcade physics resumes.
             this.tweens.add({
                 targets: pet,
-                // x and y is the position of the pet when drag end
                 x: pet.x + pointer.velocity.x * this.TWEEN_ACCELERATION,
                 y: pet.y + pointer.velocity.y * this.TWEEN_ACCELERATION,
                 duration: 600,
                 ease: Ease.QuartEaseOut,
                 onComplete: () => {
-                    // enable collision when dragging end so that collision will work again and pet go back to the screen
+                    // Restore collisions after the throw so the pet settles back inside the screen.
                     if (!pet.body!.enable) {
                         pet.body!.enable = true;
 
-                        // not sure why when enabling body, velocity become 0, and need to take a while to update velocity
+                        // Arcade clears velocity when re-enabled, so restore wall movement on the next tick.
                         setTimeout(() => {
                             switch (pet.anims.getName()) {
                                 case this.configManager.getStateName(
@@ -206,7 +200,7 @@ export default class Pets extends Phaser.Scene {
                 right: boolean
             ) => {
                 const pet = body.gameObject as Pet;
-                // if crawl to world bounds, we make the pet jump or spawn on the ground
+                // Crawlers leave the ceiling when they reach either side wall.
                 if (
                     pet.anims &&
                     pet.anims.getName() ===
@@ -234,10 +228,7 @@ export default class Pets extends Phaser.Scene {
                     this.petOnTheGroundPlayRandomState(pet);
                 }
 
-                /*
-                 * this will check on the ground and mid air if pet is beyond screen
-                 * and change pet state accordingly
-                 */
+                // Boundary recovery also handles pets released outside the visible world.
                 this.petBeyondScreenSwitchClimb(pet, {
                     up: up,
                     down: down,
@@ -247,7 +238,7 @@ export default class Pets extends Phaser.Scene {
             }
         );
 
-        // listen to setting change from setting window and update settings
+        // Settings live in another webview, so apply its events directly to the active scene.
         listen<TRenderEventListener["payload"]>(
             EventType.SettingWindowToPetOverlay,
             (event) => {
@@ -261,7 +252,7 @@ export default class Pets extends Phaser.Scene {
                             .value as boolean;
                         this.updatePetAboveTaskbar();
 
-                        // when the user switch from pet above taskbar to not above taskbar, there will be a little space for pet, we force pet to jump or play random state
+                        // Re-evaluate movement after the floor expands to include the taskbar area.
                         if (!this.allowPetAboveTaskbar) {
                             this.pets.forEach((pet) => {
                                 this.petJumpOrPlayRandomState(pet);
@@ -288,7 +279,7 @@ export default class Pets extends Phaser.Scene {
                     case DispatchType.SwitchAllowPetClimbing:
                         this.allowPetClimbing = event.payload.value as boolean;
 
-                        // when the user switch from pet climb to not climb, we force pet to jump or play random state
+                        // Move current climbers into a legal state as soon as climbing is disabled.
                         if (!this.allowPetClimbing) {
                             this.pets.forEach((pet) => {
                                 this.petJumpOrPlayRandomState(pet);
@@ -328,7 +319,7 @@ export default class Pets extends Phaser.Scene {
             100,
             this.physics.world.bounds.width - 100
         );
-        // make the pet jump from the top of the screen
+        // New pets enter from above so their initial physics state looks intentional.
         const petY = 0 + this.configManager.getFrameSize(sprite).frameHeight;
         this.pets[index] = this.physics.add
             .sprite(randomX, petY, sprite.name)
@@ -343,7 +334,7 @@ export default class Pets extends Phaser.Scene {
 
         this.pets[index].setCollideWorldBounds(true, 0, 0, true);
 
-        // store available states to pet (it actual name, not modified name)
+        // Keep raw state names on the instance while animation keys remain texture-namespaced.
         this.pets[index].availableStates = Object.keys(sprite.states);
         this.pets[index].canPlayRandomState = true;
         this.pets[index].canRandomFlip = true;
@@ -357,18 +348,17 @@ export default class Pets extends Phaser.Scene {
             if (pet.id === petId) {
                 pet.destroy();
 
-                // get pet that use the same texture as the pet that is destroyed
                 const petsWithSameTexture = this.pets.filter(
                     (pet: Pet) =>
                         pet.texture.key === this.pets[index].texture.key
                 );
 
-                // remove texture if there is only one pet that use the texture because we don't need it anymore
+                // Remove the shared texture only when this was its final pet instance.
                 if (petsWithSameTexture.length === 1) {
                     this.textures.remove(pet.texture.key);
                 }
 
-                // remove index from petClimbAndCrawlIndex if it exist because the pet is destroyed
+                // Stop update-loop work for a climber that no longer exists.
                 if (this.petClimbAndCrawlIndex.includes(index)) {
                     this.petClimbAndCrawlIndex =
                         this.petClimbAndCrawlIndex.filter((i) => i !== index);
@@ -389,11 +379,11 @@ export default class Pets extends Phaser.Scene {
 
         switch (state) {
             case "walk":
-                // if pet.scaleX is negative, it means pet is facing left, so we set direction to left, else right
+                // Signed scale is the source of truth for horizontal facing.
                 direction = pet.scaleX < 0 ? Direction.LEFT : Direction.RIGHT;
                 break;
             case "jump":
-                // feel like jump state is opposite of walk so every jump, i flip the pet horizontally :)
+                // Flip each jump to vary the pet's landing direction.
                 this.toggleFlipX(pet);
                 direction = Direction.DOWN;
                 break;
@@ -413,7 +403,6 @@ export default class Pets extends Phaser.Scene {
         this.updateDirection(pet, direction);
     }
 
-    // this function will be called every time we update the pet direction using updateDirection
     updateMovement(pet: Pet): void {
         switch (pet.direction) {
             case Direction.RIGHT:
@@ -457,18 +446,16 @@ export default class Pets extends Phaser.Scene {
                 break;
         }
 
-        // if pet is going up, we disable gravity, if pet is going down, we enable gravity
+        // Wall and ceiling movement must opt out of downward gravity.
         const isMovingUp = [
             Direction.UP,
             Direction.UPSIDELEFT,
             Direction.UPSIDERIGHT,
         ].includes(pet.direction as Direction);
 
-        // Set the gravity according to the direction
         // @ts-ignore
         pet.body!.setAllowGravity(!isMovingUp);
 
-        // Set the horizontal velocityX to zero if the direction is up
         if (pet.direction === Direction.UP) {
             pet.setVelocityX(0);
         }
@@ -484,16 +471,15 @@ export default class Pets extends Phaser.Scene {
         }
     ): void {
         try {
-            // when pet is destroyed, pet.anims will be undefined, there is a chance that this function get called because of setTimeout
+            // Delayed transitions can outlive a destroyed pet, so treat missing animation state as cancellation.
             if (!pet.anims) return;
 
-            // prevent pet from playing crawl and climb state if allowPetClimbing is false
+            // A live settings change can invalidate a queued climb or crawl transition.
             if (!this.allowPetClimbing) {
                 if (state === "climb" || state === "crawl") return;
             }
 
             const animationKey = this.configManager.getStateName(state, pet);
-            // if current state is the same as the new state, do nothing
             if (pet.anims && pet.anims.getName() === animationKey) return;
             if (!pet.availableStates.includes(state)) return;
 
@@ -514,12 +500,10 @@ export default class Pets extends Phaser.Scene {
 
             this.updateStateDirection(pet, state);
         } catch (err: any) {
-            // error could happen when trying to get name
             error(err);
         }
     }
 
-    // if lookToTheLeft is true, pet will look to the left, if false, pet will look to the right
     setPetLookToTheLeft(pet: Pet, lookToTheLeft: boolean): void {
         if (lookToTheLeft) {
             if (pet.scaleX > 0) {
@@ -543,18 +527,13 @@ export default class Pets extends Phaser.Scene {
         this.pets.forEach((pet) => {
             this.scalePet(pet, scaleValue);
 
-            // force pet to jump or play random state when scale change
+            // Re-enter behavior so resized hitboxes do not remain embedded in a boundary.
             this.petJumpOrPlayRandomState(pet);
         });
     }
 
     toggleFlipX(pet: Pet): void {
-        /*
-         * using scale because flipX doesn't flip the hitbox
-         * so i have to flip the hitbox manually
-         * Note: scaleX negative (- value) = direction left, scaleX positive (+ value) = direction right
-         */
-        // if hitbox is on the right, flip to the left
+        // Use signed scale instead of flipX so the Arcade hitbox mirrors with the sprite.
         pet.scaleX > 0 ? pet.setOffset(pet.width, 0) : pet.setOffset(0, 0);
         pet.setScale(pet.scaleX * -1, pet.scaleY);
     }
@@ -607,13 +586,12 @@ export default class Pets extends Phaser.Scene {
         this.switchState(pet, this.getOneRandomState(pet));
         pet.canPlayRandomState = false;
 
-        // add delay to prevent spamming random state too fast
+        // Rate-limit random transitions so short update intervals do not produce animation flicker.
         setTimeout(() => {
             pet.canPlayRandomState = true;
         }, this.RAND_STATE_DELAY);
     }
 
-    // this function is for when pet jump to the ground, it will call every time pet hit the ground
     switchStateAfterPetJump(pet: Pet): void {
         if (!pet) return;
         if (
@@ -627,7 +605,7 @@ export default class Pets extends Phaser.Scene {
                 repeat: 0,
             });
 
-            // after fall animation complete, we play random state
+            // Let a one-shot landing animation finish before normal behavior resumes.
             pet.canPlayRandomState = false;
             pet.on("animationcomplete", () => {
                 pet.canPlayRandomState = true;
@@ -662,7 +640,7 @@ export default class Pets extends Phaser.Scene {
     }
 
     getPetBoundDown(pet: Pet): boolean {
-        // we have to check * with scaleY because sometimes user scale the pet
+        // Boundary checks use scaled dimensions because users can resize every pet.
         return pet.y >= this.getPetGroundPosition(pet);
     }
 
@@ -680,11 +658,10 @@ export default class Pets extends Phaser.Scene {
 
     updatePetAboveTaskbar(): void {
         if (this.allowPetAboveTaskbar) {
-            // get taskbar height
+            // availHeight excludes the taskbar, which becomes the overlay's effective floor.
             const taskbarHeight =
                 window.screen.height - window.screen.availHeight;
 
-            // update world bounds to include task bar
             this.physics.world.setBounds(
                 0,
                 0,
@@ -734,6 +711,7 @@ export default class Pets extends Phaser.Scene {
             pet.anims &&
             pet.anims.getName() === this.configManager.getStateName("walk", pet)
         ) {
+            // Walking pets occasionally idle, then resume after a short rest.
             if (random >= 0 && random <= 5) {
                 this.switchState(pet, "idle");
                 setTimeout(() => {
@@ -748,21 +726,19 @@ export default class Pets extends Phaser.Scene {
                 return;
             }
         } else {
-            // enhance random state if pet is not walk
+            // Non-walking pets get more chances to transition so they do not stall indefinitely.
             if (random >= 777 && random <= 800) {
                 this.playRandomState(pet);
                 return;
             }
         }
 
-        // just some random number to play random state
         if (random >= 888 && random <= 890) {
-            // allow random flip only after pet flipped "FLIP_DELAY" time
+            // Keep spontaneous turns rare and rate-limited so movement does not jitter.
             if (pet.canRandomFlip) {
                 this.toggleFlipXThenUpdateDirection(pet);
                 pet.canRandomFlip = false;
 
-                // add delay to prevent spamming pet flip too fast
                 setTimeout(() => {
                     pet.canRandomFlip = true;
                 }, this.FLIP_DELAY);
@@ -792,13 +768,12 @@ export default class Pets extends Phaser.Scene {
 
             if (random === 78) {
                 let newPetx = pet.x;
-                // if pet climb, I want the pet to have some opposite x direction when jump
+                // Climbers jump away from their wall instead of dropping straight down.
                 if (
                     pet.anims &&
                     pet.anims.getName() ===
                         this.configManager.getStateName("climb", pet)
                 ) {
-                    // if pet.scaleX is negative, it means pet is facing left, vice versa
                     newPetx =
                         pet.scaleX < 0
                             ? Phaser.Math.Between(pet.x, 500)
@@ -808,10 +783,9 @@ export default class Pets extends Phaser.Scene {
                               );
                 }
 
-                // disable body to prevent shaking when jump
+                // Disable Arcade while the tween moves the pet so the two systems do not fight.
                 if (pet.body!.enable) pet.body!.enable = false;
                 this.switchState(pet, "jump");
-                // use tween animation to make jump more smooth
                 this.tweens.add({
                     targets: pet,
                     x: newPetx,
@@ -828,7 +802,7 @@ export default class Pets extends Phaser.Scene {
                 return;
             }
 
-            // add random pause when climb
+            // Climb and crawl animations occasionally pause so wall movement feels less mechanical.
             if (random >= 0 && random <= 5) {
                 if (
                     pet.anims &&
@@ -851,7 +825,6 @@ export default class Pets extends Phaser.Scene {
                     pet.anims.getName() ===
                         this.configManager.getStateName("crawl", pet)
                 ) {
-                    // add random pause when crawl
                     pet.anims.pause();
                     this.updateDirection(pet, Direction.UNKNOWN);
                     // @ts-ignore
@@ -859,7 +832,6 @@ export default class Pets extends Phaser.Scene {
                     setTimeout(() => {
                         if (pet.anims && !pet.anims.isPlaying) {
                             pet.anims.resume();
-                            // if pet.scaleX is negative, it means pet is facing up side left, vice versa
                             this.updateDirection(
                                 pet,
                                 pet.scaleX < 0
@@ -877,16 +849,13 @@ export default class Pets extends Phaser.Scene {
     petBeyondScreenSwitchClimb(pet: Pet, worldBounding: IWorldBounding): void {
         if (!pet) return;
 
-        // if pet is climb and crawl, we don't want to switch state again
+        // Climb and crawl already own their boundary behavior until another transition occurs.
         switch (pet.anims.getName()) {
             case this.configManager.getStateName("climb", pet):
                 return;
             case this.configManager.getStateName("crawl", pet):
                 return;
         }
-
-        // ? debug only
-        // pet.availableStates = pet.availableStates.filter(state => state !== 'climb');
 
         if (worldBounding.left || worldBounding.right) {
             if (
@@ -896,15 +865,8 @@ export default class Pets extends Phaser.Scene {
                 this.switchState(pet, "climb");
 
                 const lastPetX = pet.x;
-                // const lastPetX = pet.x + pet.width * Math.abs(pet.scaleX) * pet.originX;
                 if (worldBounding.left) {
-                    /*
-                     * not quite sure if this is correct, but after a lot of experiment
-                     * i found out that the pet will be stuck at the left side of the screen
-                     * which will result in pet.x = negative number. Because we disable and enable
-                     * pet body when drag, the pet will go back with absolute value of pet.x
-                     * so i get lastPetX to minus with petLeftPosition to get the correct position
-                     */
+                    // Correct the center-based X position so a dragged pet aligns with the left wall.
                     pet.setPosition(
                         lastPetX - this.getPetLeftPosition(pet),
                         pet.y
@@ -919,16 +881,16 @@ export default class Pets extends Phaser.Scene {
                 }
             } else {
                 if (worldBounding.down) {
-                    // if pet on the ground and beyond screen and doesn't have climb state, we flip the pet
+                    // Grounded pets without climbing turn back into the visible world.
                     this.toggleFlipXThenUpdateDirection(pet);
                 } else {
-                    // if pet bounding left or right and not on the ground, we make the pet jump or spawn on the ground
+                    // Airborne pets without climbing fall back to a supported transition.
                     this.petJumpOrPlayRandomState(pet);
                 }
             }
         } else {
             if (worldBounding.down) {
-                // if pet is on the ground after being dragged and they are not bounding left or right, we play random state
+                // A pet released safely on the ground can resume ordinary behavior.
                 if (
                     pet.anims &&
                     pet.anims.getName() ===
@@ -937,7 +899,7 @@ export default class Pets extends Phaser.Scene {
                     this.switchState(pet, this.getOneRandomState(pet));
                 }
             } else {
-                // if pet is not on the ground and they are not bounding left or right, we make the pet jump or spawn on the ground
+                // A pet released in open air needs a supported transition back to the ground.
                 this.petJumpOrPlayRandomState(pet);
             }
         }

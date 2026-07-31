@@ -45,7 +45,7 @@ function SettingWindow() {
   const { setColorScheme } = useMantineColorScheme();
 
   useEffect(() => {
-    // set active tab from url search params, by doing this user can refresh the page and still get the same tab
+    // Keep tab selection in the URL so refreshes return to the same settings view.
     if (queryParams.has('tab') && Number(queryParams.get('tab')) !== activeTab) {
       setActiveTab(Number(queryParams.get('tab')));
     }

@@ -29,7 +29,7 @@ const getSettings = async () => {
 
 export function useSettings() {
     return useQuery({ queryKey: ['settings'], queryFn: getSettings, refetchOnWindowFocus: false,
-        // disable cache
+        // Settings live on disk, so a remount should read the current file.
         gcTime: 0,
      });
 }

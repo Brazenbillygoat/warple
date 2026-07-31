@@ -47,9 +47,9 @@ function App() {
                     "#5C5F66",
                     "#373A40",
                     "#2C2E33",
-                    // shade
+                    // Mantine uses index 6 for raised dark surfaces.
                     "#1A1B1E",
-                    // background
+                    // Mantine uses index 7 for the dark page background.
                     "#141517",
                     "#1A1B1E",
                     "#101113",

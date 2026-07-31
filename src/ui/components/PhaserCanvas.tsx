@@ -16,7 +16,6 @@ function PhaserCanvas({ pet, playState }: PhaserCanvasProps) {
             roundPixels: true,
             antialias: true,
             scale: {
-                // mode: Phaser.Scale.ScaleModes.RESIZE,
                 width: CanvasSize,
                 height: CanvasSize,
             },
@@ -47,15 +46,15 @@ function PhaserCanvas({ pet, playState }: PhaserCanvasProps) {
         const game = new Phaser.Game(phaserConfig);
 
         return () => {
+            // Every card owns its Phaser instance, so destroy it when the preview leaves view.
             game.destroy(true);
-            // reset the dom
             if (phaserDom.current !== null) phaserDom.current.innerHTML = '';
         }
     }, [pet, playState]);
 
     return (
         <div style={{
-            // disable pointer events so that the canvas can be scrolled when the mouse is over it
+            // Keep page scrolling available when the pointer crosses a preview canvas.
             pointerEvents: 'none',
         }} ref={phaserDom} key={pet.id ?? pet.name}></div>
     )

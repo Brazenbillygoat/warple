@@ -2,13 +2,13 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { IPet } from "../types/IPet";
 import { ISpriteConfig, SpriteType } from "../types/ISpriteConfig";
 
+// This scene renders one inert pet for settings previews; desktop behavior lives in Pets.ts.
 export class Pet extends Phaser.Scene {
     private pet: IPet | null = null;
     private sprite: ISpriteConfig | null = null;
     private playState: string | null = null;
 
     readonly frameRate: number = 9;
-    // -1 means repeat forever
     readonly repeat: number = -1;
 
     constructor() {
@@ -27,7 +27,7 @@ export class Pet extends Phaser.Scene {
     }
 
     create(): void {
-        // register state animations
+        // Preview games are isolated, so each instance registers its own animation keys.
         for (const animationConfig of this.getAnimationConfigPerSprite(this.sprite!)) {
             this.anims.create(animationConfig);
         }
@@ -41,7 +41,7 @@ export class Pet extends Phaser.Scene {
 
         this.pet.body!.enable = false;
 
-        // disable input because we don't have any interaction with the pet, just show it
+        // Input stays disabled so scrolling the settings page never grabs the preview canvas.
         this.input.keyboard!.enabled = false;
         this.input.mouse!.enabled = false;
     }
@@ -69,14 +69,13 @@ export class Pet extends Phaser.Scene {
         const HighestFrameMax = this.getHighestFrameMax(sprite);
         for (const state in sprite.states) {
 
-            // -1 because phaser frame start from 0
+            // Config frames are one-based while Phaser frame indexes are zero-based.
             const start = sprite.states[state].start !== undefined ?
                 sprite.states[state].start! - 1 : (sprite.states[state].spriteLine! - 1) * HighestFrameMax;
             const end = sprite.states[state].end !== undefined ?
                 sprite.states[state].end! - 1 : start + sprite.states[state].frameMax! - 1;
 
             animationConfig.push({
-                // avoid duplicate key
                 key: `${state}-${sprite.name}`,
                 frames: this.anims.generateFrameNumbers(sprite.name, {
                     start: start,
@@ -95,7 +94,7 @@ export class Pet extends Phaser.Scene {
 
         let highestFrameMax = 0;
         for (const state in sprite.states) {
-            // if frameMax doesn't exist in sprite.states[state] maybe the user specify specific position using start, end
+            // Explicit start and end ranges do not need a calculated row width.
             if (!sprite.states[state].frameMax!) return 0;
             highestFrameMax = Math.max(highestFrameMax, sprite.states[state].frameMax!);
         }

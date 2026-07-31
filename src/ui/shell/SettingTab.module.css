@@ -7,8 +7,7 @@
     justify-content: center;
     color: var(--mantine-color-gray-7) !important;
 
-    /* if dark mode */
-    /* check mantine postcss to learn more about mixin and light-dark function */
+    /* Mantine's PostCSS dark mixin supplies theme-specific navigation colors. */
     @mixin dark {
         color: var(--mantine-color-dark-0) !important;
     }

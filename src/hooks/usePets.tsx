@@ -17,7 +17,7 @@ const getPets = async () => {
         return [];
     }
 
-    // check if all pets has unique id if no add id and after all check, save config again
+    // Backfill IDs for configs created before individual pets needed stable removal keys.
     pets.forEach((pet: ISpriteConfig) => {
         if (!pet.id) {
             pet.id = crypto.randomUUID();
@@ -33,7 +33,7 @@ const getPets = async () => {
 
 export function usePets(): UseQueryResult<unknown, Error> {
     return useQuery({ queryKey: ['pets'], queryFn: getPets, refetchOnWindowFocus: false,
-        // disable cache
+        // Reload the local file whenever this query remounts.
         gcTime: 0,
      });
 };
@@ -58,7 +58,7 @@ const getDefaultPets = async () => {
 
 export function useDefaultPets(): UseQueryResult<unknown, Error> {
     return useQuery({ queryKey: ['defaultPets'], queryFn: getDefaultPets, refetchOnWindowFocus: false,
-        // disable cache
+        // Reload the custom-pet linker whenever this query remounts.
         gcTime: 0,
      });
 }

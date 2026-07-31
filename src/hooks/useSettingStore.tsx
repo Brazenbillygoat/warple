@@ -4,7 +4,6 @@ import defaultPetConfig from "../config/pet_config";
 import defaultSettings from "../../src-tauri/src/app/default/settings.json";
 import { ColorScheme } from "../types/ISetting";
 
-// initialize settings
 export const useSettingStore = create<ISettingStoreState>()((set) => ({
     language: localStorage.getItem("language") ?? defaultSettings.language,
     setLanguage: (newLanguage) => {
@@ -34,13 +33,12 @@ export const useSettingStore = create<ISettingStoreState>()((set) => ({
     setPetScale: (petScale) => {
         set({petScale: petScale})
     },
-    // not actual settings that was saved in the config file
-    // this pets will be used to track the pets in user's computer and live update the pet if user add/remove pet
+    // This runtime list mirrors pets.json so React can update Phaser without reloading the app.
     pets: [],
     setPets: (newPets) => {
         set({ pets: [...newPets] })
     },
-    // default pet config that will be used in the pet shop.
+    // This catalog combines bundled pets with custom pets discovered through pet_linker.json.
     defaultPet: JSON.parse(JSON.stringify(defaultPetConfig)),
     setDefaultPet: (newDefaultPet) => {
         set({ defaultPet: [...newDefaultPet] })

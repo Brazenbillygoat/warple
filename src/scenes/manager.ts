@@ -4,22 +4,16 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { error } from "@tauri-apps/plugin-log";
 const appWindow = getCurrentWebviewWindow()
 
+// ConfigManager turns persisted sprite definitions into shared Phaser textures and animations.
 export class ConfigManager {
-    // Config for sprite sheet that's going to be loaded
     private spriteConfig: ISpriteConfig[] = [];
-    // Phaser loader plugin
     private load: Phaser.Loader.LoaderPlugin | undefined;
-    // Phaser texture manager
     private textures: Phaser.Textures.TextureManager | undefined;
-    // Phaser anims manager
     private anims: Phaser.Animations.AnimationManager | undefined;
-    // List of registered sprite name to avoid loading duplicate sprite
+    // Texture keys are shared by name so duplicate pet instances reuse the same sprite sheet.
     private registeredName: Map<string, boolean> = new Map();
 
-    // constants
-    // fps for sprite animation
     public readonly FRAME_RATE: number;
-    // repeat for sprite animation after it's done, -1 means repeat forever
     private readonly REPEAT: number = -1;
 
     constructor({
@@ -55,22 +49,22 @@ export class ConfigManager {
             return;
         }
         
-        // avoid showing broken sprite
+        // Reject incomplete custom definitions before Phaser tries to render a broken texture.
         if (!this.validatePetSprite(sprite)) return;
 
-        // in case sprite hasn't loaded yet, we load it
+        // Dynamic pets can arrive after preload, so load their texture before registering animations.
         if (this.textures && !this.textures.exists(sprite.name)) {
             this.loadSpriteSheet(sprite);
             this.load.start();
 
             this.load.once("complete", () => {
-                // if loaded, try to register state animation again
+                // Registration must retry after Phaser finishes the asynchronous texture load.
                 this.registerSpriteStateAnimation(sprite);
             });
             return;
         }
 
-        // convert sprite states to lowercase because it help to avoid error when user edit their own json file and type state in uppercase
+        // Normalize user-authored state names because behavior lookups use lowercase keys.
         for (const state in sprite.states) {
             if (state.toLowerCase() !== state) {
                 sprite.states[state.toLowerCase()] = sprite.states[state];
@@ -78,7 +72,6 @@ export class ConfigManager {
             }
         }
 
-        // register state animations for the sprite
         for (const animationConfig of this.getAnimationConfigPerSprite(
             sprite
         )) {
@@ -116,11 +109,10 @@ export class ConfigManager {
             return;
         }
 
-        // if sprite name is duplicate, we skip it because we can use the same key for different sprite object
+        // Multiple pets with the same name intentionally reuse one Phaser texture key.
         if (this.checkDuplicateName(sprite.name)) {
             return;
         }
-        // if pet sprite is not valid, we skip it to avoid error
         if (!this.validatePetSprite(sprite)) {
             return;
         }
@@ -153,8 +145,7 @@ export class ConfigManager {
         let animationConfig = [];
         const HighestFrameMax = this.getHighestFrameMax(sprite);
         for (const state in sprite.states) {
-            // we accept to type of state input, either start, end or spriteLine, frameMax
-            // -1 because phaser frame start from 0
+            // Support row-based and range-based configs, then convert one-based values for Phaser.
             const start =
                 sprite.states[state].start !== undefined
                     ? sprite.states[state].start! - 1
@@ -165,10 +156,9 @@ export class ConfigManager {
                     : start + sprite.states[state].frameMax! - 1;
 
             animationConfig.push({
-                // avoid duplicate key
+                // State names are namespaced by texture so different pets can share behavior names.
                 key: `${state}-${sprite.name}`,
                 frames: this.anims.generateFrameNumbers(sprite.name, {
-                    // -1 because phaser frame start from 0
                     start: start,
                     end: end,
                     first: start,
@@ -194,7 +184,7 @@ export class ConfigManager {
 
         let highestFrameMax = 0;
         for (const state in sprite.states) {
-            // if frameMax doesn't exist in sprite.states[state] maybe the user specify specific position using start, end
+            // Range-based states do not need a calculated row width.
             if (!sprite.states[state].frameMax!) return 0;
             highestFrameMax = Math.max(
                 highestFrameMax,
@@ -232,11 +222,10 @@ export class ConfigManager {
 
     private validatePetSprite(sprite: ISpriteConfig): boolean {
         if (!sprite.name || !sprite.imageSrc || !sprite.states) {
-            // error(`Invalid sprite config: ${sprite.name ?? 'unknown name'}`);
             return false;
         }
 
-        // technically we accept two type of size, user can either only provide frameSize, or width, height, highestFrameMax, totalSpriteLine for us to calculate frameSize
+        // Accept either a square frameSize or enough sheet dimensions to calculate each frame.
         if (
             !sprite.frameSize &&
             (!sprite.width ||
@@ -244,7 +233,6 @@ export class ConfigManager {
                 !sprite.highestFrameMax ||
                 !sprite.totalSpriteLine)
         ) {
-            // error(`Invalid sprite config: ${sprite.name}`);
             return false;
         }
 
@@ -254,7 +242,6 @@ export class ConfigManager {
                     !sprite.states[state].frameMax) &&
                 (!sprite.states[state].start || !sprite.states[state].end)
             ) {
-                // error(`Invalid sprite config: ${sprite.name}`);
                 return false;
             }
         }
@@ -263,6 +250,7 @@ export class ConfigManager {
     }
 }
 
+// InputManager makes the overlay interactive only while the OS cursor is over a pet.
 export class InputManager {
     private input: Phaser.Input.InputPlugin | undefined;
     private isIgnoreCursorEvents: boolean = false;
@@ -306,7 +294,7 @@ export class InputManager {
     public turnOnIgnoreCursorEvents(): void {
         try {
             if (!this.isIgnoreCursorEvents) {
-                // slight delay to avoid crash when call setIgnoreCursorEvents too fast
+                // Debounce WebView2 cursor-mode changes to avoid invalid window-handle errors.
                 setTimeout(() => {
                     appWindow.setIgnoreCursorEvents(true).then(() => {
                         this.isIgnoreCursorEvents = true;
@@ -327,15 +315,11 @@ export class InputManager {
                 return false;
             }
 
-            // if not pixel perfect, we can detect mouse over pet using this (with loop through pets array)
-            // return Phaser.Geom.Rectangle.Contains(this.pets[0].getBounds(), clientX, clientY);
-
-            // divide clientX,Y by window.devicePixelRatio because the game world is not scaled by devicePixelRatio, and the mouse position we get is scaled by devicePixelRatio
+            // OS cursor coordinates include display scaling while Phaser's game world does not.
             this.input.mousePointer.x = clientX / window.devicePixelRatio;
             this.input.mousePointer.y = clientY / window.devicePixelRatio;
 
-            // this returns an array of all objects that the pointer is currently over,
-            // if array length > 0, it means the pointer is over some sprite object
+            // Pixel-perfect hit testing keeps empty transparent sprite areas click-through.
             return (
                 this.input.hitTestPointer(this.input.activePointer).length > 0
             );

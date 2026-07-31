@@ -8,7 +8,7 @@ interface IEmitReRenderPetsEvent {
 }
 
 export const emitUpdatePetsEvent = async ({dispatchType, newValue}: IEmitReRenderPetsEvent) => {
-    // get the window instance by its label
+    // Settings and the overlay run in separate webviews, so live changes cross a Tauri event.
     const mainWindow = await WebviewWindow.getByLabel('main');
 
     if (mainWindow) {

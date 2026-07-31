@@ -1,9 +1,9 @@
 export interface ISpriteStateKey {
     [key: string]: {
-        // if specify frameMax and spriteLine, the app will auto calculate the tile map
+        // Row-based states identify a sprite-sheet row and the number of frames it contains.
         spriteLine?: number;
         frameMax?: number;
-        // if specify start and end, the app will choose the state animation from position start - 1 to end - 1
+        // Range-based states use one-based inclusive positions converted to Phaser frame indexes.
         start?: number;
         end?: number;
     }
@@ -14,19 +14,15 @@ export enum SpriteType {
     CUSTOM = 'custom',
 }
 
-/*
- *  If "framesize" has been specify in the config, we don't have to include these object {
- *      width, height, highestFrameMax, totalSpriteLine 
- *  }
- */
+// A square frameSize replaces width, height, highestFrameMax, and totalSpriteLine.
 export interface ISpriteConfig {
     name: string,
     credit?: {
-        // link to download
+        // Original download or asset source.
         resource?: string,
-        // link to post, etc
+        // Related post or project page.
         link?: string,
-        // link or string of name to social media
+        // Creator name or social profile.
         socialMedia?: string,
     },
     id?: string,

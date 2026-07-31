@@ -1,4 +1,4 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+// Release builds hide the extra Windows console while debug builds keep terminal logs visible.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
@@ -36,7 +36,7 @@ fn build_app() {
                     Target::new(TargetKind::Webview),
                 ])
                 .level(log::LevelFilter::Info)
-                // uncomment to enable debug logging for development
+                // Raise this temporarily when native diagnostics need more detail.
                 // .level(log::LevelFilter::Debug)
                 .build(),
         )
@@ -64,14 +64,14 @@ fn build_app() {
         .expect("error while running tauri application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                // Closing a window pauses its UI; only the tray Quit action terminates the process.
                 api.prevent_exit();
             }
         });
 }
 
 fn main() {
-    // Enable gpu hardware acceleration on Windows
-    //refer to this issue: https://github.com/tauri-apps/tauri/issues/4891
+    // WebView2 needs this override for transparent hardware rendering on some Windows systems.
     std::env::set_var(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
         "--ignore-gpu-blocklist",

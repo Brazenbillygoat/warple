@@ -5,7 +5,7 @@ export enum Direction {
     RIGHT = 'RIGHT',
     UPSIDELEFT = 'UPSIDELEFT',
     UPSIDERIGHT = 'UPSIDERIGHT',
-    // UNKNOWN is used when the pet has no movement
+    // UNKNOWN stops movement without implying a visual animation state.
     UNKNOWN = 'UNKNOWN',
 }
 
@@ -30,8 +30,7 @@ export interface ISwitchStateOptions {
     repeatDelay?: number,
 }
 
-// available easing options, for more info see:
-// https://rexrainbow.github.io/phaser3-rex-notes/docs/site/ease-function/?h=ease
+// Values map directly to Phaser easing names accepted by tweens.
 export enum Ease {
     Power0 = "Linear",
     Power1 = "Quadratic.Out",

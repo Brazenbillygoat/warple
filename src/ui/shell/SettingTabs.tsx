@@ -11,7 +11,7 @@ function SettingTabs({ activeTab, settingTabs }: ISettingTabsProps) {
   const handleSetTab = useCallback((index: number) => {
     setActiveTab(index);
 
-    // update url search params
+    // Mirror the active tab in the URL so refreshes preserve navigation.
     searchParams.set('tab', index.toString());
     setSearchParams(searchParams);
   }, [setActiveTab]);

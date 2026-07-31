@@ -8,6 +8,7 @@ use std::{
 
 use tauri::App;
 
+// These are the only JSON files allowed directly under the application data root.
 const ROOT_CONFIG_FILES: [&str; 3] = ["settings.json", "pets.json", "pet_linker.json"];
 
 #[derive(Debug)]
@@ -46,6 +47,7 @@ pub fn app_root() -> PathBuf {
 }
 
 fn has_only_normal_components(path: &Path) -> bool {
+    // Reject roots, parent traversal, and platform prefixes before joining untrusted paths.
     path.components()
         .all(|component| matches!(component, Component::Normal(_)))
 }
@@ -71,6 +73,7 @@ fn is_allowed_asset_path(path: &Path) -> bool {
 fn relative_to_app_root(path_str: &str) -> Result<PathBuf, String> {
     let supplied = PathBuf::from(path_str);
     if supplied.is_absolute() {
+        // Absolute paths are accepted only when they already point inside this app's data root.
         supplied
             .strip_prefix(app_root())
             .map(Path::to_path_buf)
@@ -81,6 +84,7 @@ fn relative_to_app_root(path_str: &str) -> Result<PathBuf, String> {
 }
 
 fn resolve_config_path(config_name: &str) -> Result<PathBuf, String> {
+    // Keep the allowlist here so every read and write command shares the same boundary.
     let relative = relative_to_app_root(config_name)?;
     if !is_allowed_config_path(&relative) {
         return Err(format!("Config path is not allowed: {config_name}"));
@@ -132,6 +136,7 @@ pub fn write_app_config(config_name: &str, value: Value) -> Result<(), String> {
     fs::create_dir_all(parent)
         .map_err(|err| format!("Could not create '{}': {err}", parent.display()))?;
 
+    // Preserve the upstream file shape while exposing only the nested app value to the frontend.
     let document = serde_json::to_string_pretty(&json!({ "app": value }))
         .map_err(|err| format!("Could not serialize '{}': {err}", path.display()))?;
     fs::write(&path, document).map_err(|err| format!("Could not write '{}': {err}", path.display()))

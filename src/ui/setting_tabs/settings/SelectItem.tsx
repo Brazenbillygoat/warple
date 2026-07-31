@@ -1,5 +1,3 @@
-//Docs https://mantine.dev/core/select/
-
 import { forwardRef } from 'react';
 import { Group, Avatar, Text, Image } from '@mantine/core';
 

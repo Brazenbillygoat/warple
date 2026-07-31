@@ -4,15 +4,13 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[tauri::command]
 pub async fn reopen_main_window(app: tauri::AppHandle) -> Result<(), String> {
-    // Check if a window with label "main" already exists
+    // Reuse the single overlay because duplicate fullscreen windows double the Phaser workload.
     if let Some(window) = app.get_webview_window("main") {
-        // Bring the existing window to focus
         window.set_focus().map_err(|e| e.to_string())?;
         info!("Main window already exists, brought to focus");
         return Ok(());
     }
 
-    // If no window exists, create a new one
     let window = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("/".into()))
         .fullscreen(true)
         .resizable(false)
@@ -23,7 +21,7 @@ pub async fn reopen_main_window(app: tauri::AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Allow click-through window
+    // Start click-through and let the frontend enable input only over visible pet pixels.
     window
         .set_ignore_cursor_events(true)
         .map_err(|e| e.to_string())?;

@@ -1,5 +1,4 @@
 import { Select, Slider } from "@mantine/core";
-import { SelectItem } from "./settings/SelectItem";
 import languages from "../../locale/languages";
 import SettingSwitch from "./settings/SettingSwitch";
 import { useTranslation } from "react-i18next";
@@ -71,7 +70,6 @@ function Settings() {
                 my={"sm"}
                 label={t("Language")}
                 placeholder="Pick one"
-                // itemComponent={SelectItem}
                 data={languages}
                 maxDropdownHeight={400}
                 value={i18n.language}

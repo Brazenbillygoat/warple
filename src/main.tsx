@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const queryClient = new QueryClient();
 
-// prevent right click menu
+// Disable the browser context menu because these webviews are application chrome, not web pages.
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
