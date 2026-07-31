@@ -32,8 +32,6 @@ import { Notifications } from '@mantine/notifications';
 import About from './ui/setting_tabs/About';
 import useQueryParams from './hooks/useQueryParams';
 import { ModalsProvider } from '@mantine/modals';
-import useInit from './hooks/useInit';
-import { checkForUpdate } from './utils/update';
 import { DispatchType } from './types/IEvents';
 import AddPet from './ui/setting_tabs/AddPet';
 import '@mantine/core/styles.css';
@@ -45,11 +43,6 @@ function SettingWindow() {
   const queryParams = useQueryParams();
   const { activeTab, setActiveTab } = useSettingTabStore();
   const { setColorScheme } = useMantineColorScheme();
-
-  // check for update when open settings window
-  useInit(() => {
-    checkForUpdate();
-  });
 
   useEffect(() => {
     // set active tab from url search params, by doing this user can refresh the page and still get the same tab
