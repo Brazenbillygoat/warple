@@ -2,18 +2,58 @@ import { error, info } from "@tauri-apps/plugin-log";
 import { ORDINARY_ROLES, type EngineRole, type ValidatedCompanionProfile } from "../profiles/types";
 import { selectWeightedOrdinaryRole } from "../profiles/weightedState";
 import type { OverlayGeometry, Rectangle } from "../runtime/geometry";
+import {
+    aggregateCollisionContacts,
+    clampBodyCenterToRectangle,
+    filterCollisionSamplesByOtherBody,
+    finiteVectorOrZero,
+    matterForceForSemanticAcceleration,
+    matterVelocityToPixelsPerSecond,
+    mergeCollisionSamplesForPolicy,
+    pixelsPerSecondToMatterVelocity,
+    pixelsPerSecondVectorToMatterVelocity,
+    selectContactTransition,
+    suppressContactDirection,
+    type AggregatedContacts,
+    type CollisionSample,
+    type ContactDirection,
+    type MechanicalState,
+    type Vector,
+} from "../runtime/matterPolicy";
 import { calculateReleaseVelocity } from "../runtime/releaseVelocity";
-import { getSpriteCentersInsideBounds, selectWorldBoundaryAction } from "../runtime/worldBounds";
 import { Direction, Ease } from "../types/IPet";
 import { ConfigManager, InputManager } from "./manager";
 
 const RUNTIME_UPDATE_INTERVAL_MS = 1000 / 9;
+const WALL_THICKNESS = 40;
+const SURFACE_GRIP_SPEED = 6;
+const BOUNDS_EPSILON = 0.5;
+const INITIAL_CEILING_GAP = 1;
 
-interface Pet extends Phaser.Types.Physics.Arcade.SpriteWithDynamicBody {
+const CATEGORY = Object.freeze({
+    companion: 0x0001,
+    surface: 0x0002,
+});
+
+type SurfaceRole = "floor" | "ceiling" | "wall";
+type SurfaceEdge = "top" | "bottom" | "left" | "right";
+
+interface SurfaceDefinition {
+    readonly id: string;
+    readonly role: SurfaceRole;
+    readonly climbableEdges: readonly SurfaceEdge[];
+}
+
+interface MatterCollisionEvent {
+    readonly pairs: readonly Phaser.Types.Physics.Matter.MatterCollisionPair[];
+}
+
+type Pet = Phaser.Physics.Matter.Sprite & {
+    readonly body: MatterJS.BodyType;
     direction: Direction;
     role: EngineRole;
     canRandomFlip: boolean;
-}
+};
 
 interface SceneRegistry {
     readonly profile: ValidatedCompanionProfile;
@@ -28,9 +68,17 @@ export default class Pets extends Phaser.Scene {
     private configManager!: ConfigManager;
     private inputManager!: InputManager;
     private pet: Pet | undefined;
+    private state: MechanicalState = "airborne";
+    private climbSide: "left" | "right" | undefined;
+    private crawlEntrySide: "left" | "right" | undefined;
+    private readonly activeContactSamples = new Map<string, CollisionSample>();
+    private readonly pendingImpactSamples = new Map<string, CollisionSample>();
+    private readonly surfacesByBodyId = new Map<number, SurfaceDefinition>();
     private frameElapsedMs = 0;
     private nextOrdinaryTransitionAt = 0;
     private startupFailed = false;
+    private surfaceJumpInProgress = false;
+    private surfaceJumpTween: Phaser.Tweens.Tween | undefined;
 
     constructor() {
         super({ key: "Pets" });
@@ -55,10 +103,10 @@ export default class Pets extends Phaser.Scene {
         if (this.startupFailed) return;
         try {
             this.configManager.registerAnimations();
-            this.applyWorkAreaBounds();
+            this.createWorkAreaSurfaces();
             this.pet = this.createCompanion();
+            this.registerCollisionBehavior();
             this.registerDragBehavior();
-            this.registerWorldBoundsBehavior();
             this.startInitialBehavior();
             this.readRegistry().startupReady();
             info("Companion scene ready");
@@ -71,6 +119,10 @@ export default class Pets extends Phaser.Scene {
     update(_time: number, delta: number): void {
         const pet = this.pet;
         if (!pet) return;
+
+        const contacts = this.getPolicySurfaceContacts();
+        this.pendingImpactSamples.clear();
+        this.applyContactPolicy(contacts);
 
         this.frameElapsedMs += delta;
         if (this.frameElapsedMs < RUNTIME_UPDATE_INTERVAL_MS) return;
@@ -90,10 +142,83 @@ export default class Pets extends Phaser.Scene {
         };
     }
 
-    private applyWorkAreaBounds(): void {
+    private createWorkAreaSurfaces(): void {
         const { x, y, width, height } = this.geometry.workArea;
-        this.physics.world.setBounds(x, y, width, height);
-        this.physics.world.setBoundsCollision(true, true, true, true);
+        const walls = [
+            {
+                definition: {
+                    id: "work-area-floor",
+                    role: "floor",
+                    climbableEdges: [] as const,
+                },
+                body: this.matter.add.rectangle(
+                    x + width / 2,
+                    y + height + WALL_THICKNESS / 2,
+                    width + WALL_THICKNESS * 2,
+                    WALL_THICKNESS,
+                    this.surfaceOptions("work-area-floor"),
+                ),
+            },
+            {
+                definition: {
+                    id: "work-area-ceiling",
+                    role: "ceiling",
+                    climbableEdges: [] as const,
+                },
+                body: this.matter.add.rectangle(
+                    x + width / 2,
+                    y - WALL_THICKNESS / 2,
+                    width + WALL_THICKNESS * 2,
+                    WALL_THICKNESS,
+                    this.surfaceOptions("work-area-ceiling"),
+                ),
+            },
+            {
+                definition: {
+                    id: "work-area-left-wall",
+                    role: "wall",
+                    climbableEdges: ["right"] as const,
+                },
+                body: this.matter.add.rectangle(
+                    x - WALL_THICKNESS / 2,
+                    y + height / 2,
+                    WALL_THICKNESS,
+                    height + WALL_THICKNESS * 2,
+                    this.surfaceOptions("work-area-left-wall"),
+                ),
+            },
+            {
+                definition: {
+                    id: "work-area-right-wall",
+                    role: "wall",
+                    climbableEdges: ["left"] as const,
+                },
+                body: this.matter.add.rectangle(
+                    x + width + WALL_THICKNESS / 2,
+                    y + height / 2,
+                    WALL_THICKNESS,
+                    height + WALL_THICKNESS * 2,
+                    this.surfaceOptions("work-area-right-wall"),
+                ),
+            },
+        ] satisfies readonly { definition: SurfaceDefinition; body: MatterJS.BodyType }[];
+
+        for (const { definition, body } of walls) {
+            this.surfacesByBodyId.set(body.id, definition);
+        }
+    }
+
+    private surfaceOptions(label: string): Phaser.Types.Physics.Matter.MatterBodyConfig {
+        return {
+            isStatic: true,
+            label,
+            friction: 0.2,
+            slop: 0,
+            collisionFilter: {
+                category: CATEGORY.surface,
+                mask: CATEGORY.companion,
+            },
+        };
     }
 
     private createCompanion(): Pet {
@@ -103,114 +228,244 @@ export default class Pets extends Phaser.Scene {
         const minX = Math.ceil(bounds.x + halfWidth);
         const maxX = Math.floor(bounds.x + bounds.width - halfWidth);
         const startX = Phaser.Math.Between(minX, Math.max(minX, maxX));
-        const startY = bounds.y + halfHeight;
-        const pet = this.physics.add
-            .sprite(startX, startY, this.profile.id)
+        // Start just clear of the Matter ceiling pair so the configured initial
+        // drop cannot be misclassified as an impact while moving away from it.
+        const startY = bounds.y + halfHeight + INITIAL_CEILING_GAP;
+        const pet = this.matter.add
+            .sprite(startX, startY, this.profile.id, 0, {
+                label: `companion-${this.profile.id}`,
+                friction: 0.05,
+                frictionStatic: 0,
+                frictionAir: 0,
+                restitution: 0,
+                slop: 0,
+                collisionFilter: {
+                    category: CATEGORY.companion,
+                    mask: CATEGORY.surface,
+                },
+            })
             .setScale(this.profile.behavior.scale)
+            .setFixedRotation()
             .setInteractive({
                 draggable: this.profile.behavior.dragging.enabled,
-                pixelPerfect: true,
             }) as Pet;
 
-        pet.setCollideWorldBounds(true, 0, 0, true);
+        if (this.profile.behavior.dragging.enabled) this.input.setDraggable(pet);
         pet.direction = Direction.UNKNOWN;
         pet.role = "stand";
         pet.canRandomFlip = true;
         return pet;
     }
 
-    private registerDragBehavior(): void {
-        if (!this.profile.behavior.dragging.enabled) return;
-
-        this.input.on("dragstart", (_pointer: unknown, pet: Pet) => {
-            pet.disableBody();
+    private registerCollisionBehavior(): void {
+        this.matter.world.on("collisionstart", (event: MatterCollisionEvent) => {
+            for (const pair of event.pairs) this.updateActiveContact(pair, true);
         });
-
-        this.input.on("drag", (_pointer: unknown, pet: Pet, dragX: number, dragY: number) => {
-            pet.setPosition(dragX, dragY);
-            this.switchRole(pet, "drag");
-
-            const dragStartX = pet.input?.dragStartX ?? pet.x;
-            this.setPetLookToTheLeft(pet, pet.x <= dragStartX);
+        this.matter.world.on("collisionactive", (event: MatterCollisionEvent) => {
+            for (const pair of event.pairs) this.updateActiveContact(pair);
         });
-
-        this.input.on("dragend", (pointer: Phaser.Input.Pointer, pet: Pet) => {
-            const dragging = this.profile.behavior.dragging;
-            const transitions = this.profile.behavior.supportedTransitions;
-            this.clampPetInsideWorkArea(pet);
-
-            if (!transitions.dragToThrow) {
-                pet.enableBody(true, pet.x, pet.y);
-                this.recoverAfterInteraction(pet);
-                return;
-            }
-
-            const velocity = calculateReleaseVelocity(
-                pointer.velocity,
-                dragging.throwVelocityMultiplier,
-                dragging.maxThrowSpeed,
-            );
-            this.switchRole(pet, "jump");
-            pet.enableBody(true, pet.x, pet.y);
-            pet.body.setAllowGravity(true);
-            pet.setAcceleration(0, this.profile.behavior.movement.acceleration);
-            pet.setVelocity(velocity.x, velocity.y);
+        this.matter.world.on("collisionend", (event: MatterCollisionEvent) => {
+            for (const pair of event.pairs) this.activeContactSamples.delete(pair.id);
         });
+        this.matter.world.on("beforeupdate", () => this.beforePhysicsStep());
     }
 
-    private registerWorldBoundsBehavior(): void {
-        this.physics.world.on(
-            "worldbounds",
-            (
-                body: Phaser.Physics.Arcade.Body,
-                up: boolean,
-                down: boolean,
-                left: boolean,
-                right: boolean,
-            ) => {
-                const pet = body.gameObject as Pet;
-                const transitions = this.profile.behavior.supportedTransitions;
-                const action = selectWorldBoundaryAction(
-                    pet.role,
-                    { up, down, left, right },
-                    transitions.crawlEdgeToJump,
-                    this.profile.behavior.climbing.enabled && transitions.climbToCrawl,
-                );
+    private updateActiveContact(
+        pair: Phaser.Types.Physics.Matter.MatterCollisionPair,
+        latchImpact = false,
+    ): void {
+        const pet = this.pet;
+        if (!pet) return;
+        const bodyA = this.rootBody(pair.bodyA);
+        const bodyB = this.rootBody(pair.bodyB);
+        if (bodyA.id !== pet.body.id && bodyB.id !== pet.body.id) return;
 
-                switch (action) {
-                    case "crawl-edge-jump":
-                        this.beginJump(pet);
-                        break;
-                    case "ceiling-crawl":
-                        this.switchRole(pet, "crawl");
-                        break;
-                    case "ceiling-fall":
-                        this.beginJump(pet);
-                        break;
-                    case "landing":
-                        this.finishLanding(pet);
-                        break;
-                    case "side":
-                        this.handleSideBoundary(pet, left, right, down);
-                        break;
-                }
-            },
+        const sample: CollisionSample = {
+            pairId: pair.id,
+            bodyAId: bodyA.id,
+            bodyBId: bodyB.id,
+            bodyALabel: bodyA.label,
+            bodyBLabel: bodyB.label,
+            normal: finiteVectorOrZero(pair.collision.normal),
+        };
+        this.activeContactSamples.set(pair.id, sample);
+        if (latchImpact) this.pendingImpactSamples.set(pair.id, sample);
+    }
+
+    private rootBody(body: MatterJS.BodyType): MatterJS.BodyType {
+        return body.parent && body.parent !== body ? body.parent : body;
+    }
+
+    private getPolicySurfaceContacts(): AggregatedContacts {
+        const pet = this.pet;
+        if (!pet) return this.emptyContacts();
+        const contactSamples = mergeCollisionSamplesForPolicy(
+            this.activeContactSamples.values(),
+            this.pendingImpactSamples.values(),
         );
+        const samples = filterCollisionSamplesByOtherBody(
+            contactSamples,
+            pet.body.id,
+            this.surfacesByBodyId,
+        );
+        return aggregateCollisionContacts(samples, pet.body.id);
     }
 
-    private startInitialBehavior(): void {
-        if (this.profile.behavior.supportedTransitions.initialDrop) {
-            this.beginJump(this.pet!);
-        } else {
-            this.playOrdinaryState(this.pet!);
+    private emptyContacts(): AggregatedContacts {
+        return { up: false, down: false, left: false, right: false, normalized: [] };
+    }
+
+    private applyContactPolicy(contacts: AggregatedContacts): void {
+        if (this.surfaceJumpInProgress || this.releaseFromMissingSurface(contacts)) return;
+        const transitionContacts = this.withCrawlEntryContactSuppressed(contacts);
+        const transitions = this.profile.behavior.supportedTransitions;
+        const action = selectContactTransition(this.state, transitionContacts, {
+            crawlEdgeDeparture: transitions.crawlEdgeToJump,
+            ceilingToCrawl: this.profile.behavior.climbing.enabled && transitions.climbToCrawl,
+        });
+
+        switch (action) {
+            case "crawl-edge-departure":
+                this.departFromCrawl(transitionContacts);
+                break;
+            case "ceiling-crawl":
+                this.beginCeilingCrawl(contacts);
+                break;
+            case "ceiling-fall":
+                this.beginAirborne({ x: 0, y: this.profile.behavior.movement.speed });
+                break;
+            case "landing":
+                this.finishLanding();
+                break;
+            case "side":
+                this.handleSideContact(contacts);
+                break;
         }
     }
 
-    private beginJump(pet: Pet): void {
-        this.switchRole(pet, "jump");
+    private withCrawlEntryContactSuppressed(contacts: AggregatedContacts): AggregatedContacts {
+        const entrySide = this.crawlEntrySide;
+        if (!entrySide) return contacts;
+        if (!contacts[entrySide]) {
+            this.crawlEntrySide = undefined;
+            return contacts;
+        }
+        return suppressContactDirection(contacts, entrySide);
     }
 
-    private finishLanding(pet: Pet): void {
+    private releaseFromMissingSurface(contacts: AggregatedContacts): boolean {
+        const supportMissing =
+            (this.state === "grounded" && !contacts.down) ||
+            (this.state === "climbing" && !contacts.left && !contacts.right) ||
+            (this.state === "crawling" && !contacts.up);
+        if (!supportMissing || !this.pet) return false;
+
+        this.beginAirborne(matterVelocityToPixelsPerSecond(this.pet.body.velocity));
+        return true;
+    }
+
+    private beforePhysicsStep(): void {
+        const pet = this.pet;
+        if (!pet) return;
+        const body = pet.body;
+        const speed = this.profile.behavior.movement.speed;
+
+        if (this.surfaceJumpInProgress) {
+            pet.setIgnoreGravity(true);
+            this.matter.body.setVelocity(body, { x: 0, y: 0 });
+            return;
+        }
+
+        switch (this.state) {
+            case "grounded": {
+                pet.setIgnoreGravity(false);
+                const horizontalSpeed =
+                    pet.direction === Direction.LEFT
+                        ? -speed
+                        : pet.direction === Direction.RIGHT
+                          ? speed
+                          : 0;
+                this.matter.body.setVelocity(body, {
+                    x: pixelsPerSecondToMatterVelocity(horizontalSpeed),
+                    y: body.velocity.y,
+                });
+                break;
+            }
+            case "airborne":
+                pet.setIgnoreGravity(false);
+                this.matter.body.applyForce(
+                    body,
+                    body.position,
+                    matterForceForSemanticAcceleration(
+                        { x: 0, y: this.profile.behavior.movement.acceleration },
+                        body.mass,
+                    ),
+                );
+                break;
+            case "climbing":
+                pet.setIgnoreGravity(true);
+                this.matter.body.setVelocity(
+                    body,
+                    pixelsPerSecondVectorToMatterVelocity({
+                        x:
+                            this.climbSide === "left"
+                                ? -SURFACE_GRIP_SPEED
+                                : this.climbSide === "right"
+                                  ? SURFACE_GRIP_SPEED
+                                  : 0,
+                        y: pet.direction === Direction.UP ? -speed : 0,
+                    }),
+                );
+                break;
+            case "crawling":
+                pet.setIgnoreGravity(true);
+                this.matter.body.setVelocity(
+                    body,
+                    pixelsPerSecondVectorToMatterVelocity({
+                        x:
+                            pet.direction === Direction.UPSIDELEFT
+                                ? -speed
+                                : pet.direction === Direction.UPSIDERIGHT
+                                  ? speed
+                                  : 0,
+                        y: -SURFACE_GRIP_SPEED,
+                    }),
+                );
+                break;
+            case "dragged":
+                pet.setIgnoreGravity(true);
+                break;
+        }
+    }
+
+    private beginCeilingCrawl(contacts: AggregatedContacts): void {
+        const pet = this.pet;
+        if (!pet || this.state === "crawling") return;
+        const entrySide = contacts.left ? "left" : contacts.right ? "right" : undefined;
+        if (entrySide) {
+            this.crawlEntrySide = entrySide;
+            this.setPetLookToTheLeft(pet, entrySide === "right");
+        } else {
+            const velocity = matterVelocityToPixelsPerSecond(pet.body.velocity);
+            if (Math.abs(velocity.x) > 1) this.setPetLookToTheLeft(pet, velocity.x < 0);
+        }
+        this.setMechanicalState("crawling");
+        this.switchRole(pet, "crawl");
+    }
+
+    private departFromCrawl(contacts: AggregatedContacts): void {
+        const horizontal = contacts.right
+            ? -this.profile.behavior.movement.speed
+            : this.profile.behavior.movement.speed;
+        this.beginAirborne({ x: horizontal, y: this.profile.behavior.movement.speed });
+    }
+
+    private finishLanding(): void {
+        const pet = this.pet;
+        if (!pet || this.state === "grounded") return;
+        this.matter.body.setVelocity(pet.body, { x: 0, y: 0 });
+        this.setMechanicalState("grounded");
+
         const transitions = this.profile.behavior.supportedTransitions;
         if (pet.role === "jump") {
             if (transitions.jumpToFall) {
@@ -232,19 +487,87 @@ export default class Pets extends Phaser.Scene {
         }
     }
 
+    private handleSideContact(contacts: AggregatedContacts): void {
+        const pet = this.pet;
+        if (
+            !pet ||
+            !this.profile.behavior.climbing.enabled ||
+            !this.profile.behavior.supportedTransitions.wallToClimb ||
+            !this.hasClimbableSide(contacts)
+        ) {
+            return;
+        }
+
+        this.climbSide = contacts.left ? "left" : contacts.right ? "right" : undefined;
+        if (!this.climbSide) return;
+        this.setPetLookToTheLeft(pet, this.climbSide === "left");
+        this.setMechanicalState("climbing");
+        this.switchRole(pet, "climb");
+    }
+
+    private hasClimbableSide(contacts: AggregatedContacts): boolean {
+        return contacts.normalized.some((contact) => {
+            const surface = this.surfacesByBodyId.get(contact.otherBodyId);
+            if (!surface) return false;
+            return contact.directions.some((direction) => {
+                const edge = this.surfaceEdgeForContact(direction);
+                return edge ? surface.climbableEdges.includes(edge) : false;
+            });
+        });
+    }
+
+    private surfaceEdgeForContact(direction: ContactDirection): SurfaceEdge | undefined {
+        const edges: Partial<Record<ContactDirection, SurfaceEdge>> = {
+            left: "right",
+            right: "left",
+            up: "bottom",
+            down: "top",
+        };
+        return edges[direction];
+    }
+
+    private setMechanicalState(state: MechanicalState): void {
+        this.state = state;
+        if (state !== "climbing") this.climbSide = undefined;
+        if (state !== "crawling") this.crawlEntrySide = undefined;
+    }
+
+    private startInitialBehavior(): void {
+        const pet = this.pet!;
+        if (this.profile.behavior.supportedTransitions.initialDrop) {
+            this.beginAirborne({ x: 0, y: this.profile.behavior.movement.speed });
+        } else {
+            this.setMechanicalState("grounded");
+            this.playOrdinaryState(pet);
+        }
+    }
+
+    private beginAirborne(semanticVelocity: Vector): void {
+        const pet = this.pet;
+        if (!pet) return;
+        pet.setIgnoreGravity(false);
+        this.matter.body.setVelocity(
+            pet.body,
+            pixelsPerSecondVectorToMatterVelocity(semanticVelocity),
+        );
+        this.setMechanicalState("airborne");
+        this.switchRole(pet, "jump");
+    }
+
     private playOrdinaryState(pet: Pet): void {
         const role = selectWeightedOrdinaryRole(
             this.profile.behavior.ordinaryTransitions.weights,
             Math.random(),
         );
+        this.setMechanicalState("grounded");
         this.switchRole(pet, role);
         this.nextOrdinaryTransitionAt =
             this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
     }
 
     private updateOrdinaryBehavior(pet: Pet): void {
+        if (this.state !== "grounded") return;
         if (!ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number])) return;
-        if (!this.getBounds(pet).down) return;
 
         if (this.time.now >= this.nextOrdinaryTransitionAt) this.playOrdinaryState(pet);
 
@@ -261,7 +584,7 @@ export default class Pets extends Phaser.Scene {
     }
 
     private updateClimbAndCrawlBehavior(pet: Pet): void {
-        if (pet.role !== "climb" && pet.role !== "crawl") return;
+        if (this.state !== "climbing" && this.state !== "crawling") return;
         const climbing = this.profile.behavior.climbing;
         const jumpSample = Phaser.Math.Between(0, climbing.randomJumpSampleMax);
         if (jumpSample === climbing.randomJumpTrigger) {
@@ -271,18 +594,18 @@ export default class Pets extends Phaser.Scene {
 
         const pauseSample = Phaser.Math.Between(0, climbing.pauseSampleMax);
         if (pauseSample > climbing.pauseTriggerMax || !pet.anims.isPlaying) return;
-        const pausedRole = pet.role;
+        const pausedState = this.state;
         pet.anims.pause();
         this.updateDirection(pet, Direction.UNKNOWN);
-        pet.body.setAllowGravity(false);
+        pet.setIgnoreGravity(true);
         window.setTimeout(() => {
-            if (!pet.active || pet.role !== pausedRole || pet.anims.isPlaying) return;
+            if (!pet.active || this.state !== pausedState || pet.anims.isPlaying) return;
             pet.anims.resume();
             this.updateDirection(
                 pet,
-                pausedRole === "climb"
+                pausedState === "climbing"
                     ? Direction.UP
-                    : pet.scaleX < 0
+                    : pet.flipX
                       ? Direction.UPSIDELEFT
                       : Direction.UPSIDERIGHT,
             );
@@ -292,22 +615,137 @@ export default class Pets extends Phaser.Scene {
     private jumpFromSurface(pet: Pet): void {
         const centers = this.getCenters(pet);
         const targetX =
-            pet.role === "climb"
+            this.state === "climbing"
                 ? Phaser.Math.Between(Math.ceil(centers.left), Math.floor(centers.right))
                 : pet.x;
-        pet.body.enable = false;
+        const targetY = centers.bottom;
+        const tweenPosition = { x: pet.x, y: pet.y };
+
+        this.clearContactsForBody(pet.body.id);
+        this.makeBodyStatic(pet.body);
+        this.surfaceJumpInProgress = true;
+        this.setMechanicalState("airborne");
         this.switchRole(pet, "jump");
-        this.tweens.add({
-            targets: pet,
+        this.surfaceJumpTween = this.tweens.add({
+            targets: tweenPosition,
             x: targetX,
-            y: centers.bottom,
+            y: targetY,
             duration: this.profile.behavior.climbing.jumpDurationMs,
             ease: Ease.QuadEaseOut,
+            onUpdate: () => {
+                const position = { x: tweenPosition.x, y: tweenPosition.y };
+                this.matter.body.setPosition(pet.body, position);
+                pet.setPosition(position.x, position.y);
+            },
             onComplete: () => {
-                pet.body.enable = true;
-                this.finishLanding(pet);
+                this.surfaceJumpTween = undefined;
+                this.surfaceJumpInProgress = false;
+                this.restoreDynamicBody(pet.body, { x: targetX, y: targetY });
+                this.matter.body.setVelocity(
+                    pet.body,
+                    pixelsPerSecondVectorToMatterVelocity({
+                        x: 0,
+                        y: this.profile.behavior.movement.speed,
+                    }),
+                );
             },
         });
+    }
+
+    private registerDragBehavior(): void {
+        if (!this.profile.behavior.dragging.enabled) return;
+
+        this.input.on(
+            Phaser.Input.Events.DRAG_START,
+            (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
+                if (gameObject === this.pet) this.beginDrag();
+            },
+        );
+        this.input.on(
+            Phaser.Input.Events.DRAG,
+            (
+                _pointer: Phaser.Input.Pointer,
+                gameObject: Phaser.GameObjects.GameObject,
+                dragX: number,
+                dragY: number,
+            ) => {
+                const pet = this.pet;
+                if (!pet || gameObject !== pet) return;
+                this.positionDraggedPet(pet, { x: dragX, y: dragY });
+                this.setPetLookToTheLeft(pet, dragX <= (pet.input?.dragStartX ?? dragX));
+            },
+        );
+        this.input.on(
+            Phaser.Input.Events.DRAG_END,
+            (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
+                if (gameObject === this.pet) this.releaseDraggedPet(pointer);
+            },
+        );
+    }
+
+    private beginDrag(): void {
+        const pet = this.pet;
+        if (!pet) return;
+        this.surfaceJumpTween?.stop();
+        this.surfaceJumpTween = undefined;
+        this.surfaceJumpInProgress = false;
+        this.clearContactsForBody(pet.body.id);
+        this.makeBodyStatic(pet.body);
+        this.setMechanicalState("dragged");
+        this.switchRole(pet, "drag");
+    }
+
+    private makeBodyStatic(body: MatterJS.BodyType): void {
+        this.matter.body.setVelocity(body, { x: 0, y: 0 });
+        this.matter.body.setAngularVelocity(body, 0);
+        this.matter.body.setStatic(body, true);
+    }
+
+    private positionDraggedPet(pet: Pet, requestedPosition: Vector): void {
+        const position = clampBodyCenterToRectangle(
+            requestedPosition,
+            this.getBodyHalfExtents(pet.body),
+            this.geometry.workArea,
+        );
+        this.matter.body.setPosition(pet.body, position);
+        this.matter.body.setVelocity(pet.body, { x: 0, y: 0 });
+        this.matter.body.setAngularVelocity(pet.body, 0);
+        pet.setPosition(position.x, position.y);
+    }
+
+    private releaseDraggedPet(pointer: Phaser.Input.Pointer): void {
+        const pet = this.pet;
+        if (!pet) return;
+        const position = this.clampedBodyPosition(pet.body);
+        this.restoreDynamicBody(pet.body, position);
+
+        if (!this.profile.behavior.supportedTransitions.dragToThrow) {
+            this.recoverAfterInteraction(pet);
+            return;
+        }
+
+        const dragging = this.profile.behavior.dragging;
+        const semanticVelocity = calculateReleaseVelocity(
+            pointer.velocity,
+            dragging.throwVelocityMultiplier,
+            dragging.maxThrowSpeed,
+        );
+        this.matter.body.setVelocity(
+            pet.body,
+            pixelsPerSecondVectorToMatterVelocity(semanticVelocity, dragging.maxThrowSpeed),
+        );
+        this.setMechanicalState("airborne");
+        this.switchRole(pet, "jump");
+    }
+
+    private restoreDynamicBody(body: MatterJS.BodyType, position: Vector): void {
+        this.matter.body.setVelocity(body, { x: 0, y: 0 });
+        this.matter.body.setAngularVelocity(body, 0);
+        this.matter.body.setPosition(body, position);
+        this.matter.body.setStatic(body, false);
+        this.matter.body.setPosition(body, position);
+        this.matter.body.setAngle(body, 0);
+        this.matter.body.setInertia(body, Infinity);
     }
 
     private recoverAfterInteraction(pet: Pet): void {
@@ -315,9 +753,9 @@ export default class Pets extends Phaser.Scene {
         if (bounds.left || bounds.right) {
             this.handleSideBoundary(pet, bounds.left, bounds.right, bounds.down);
         } else if (bounds.down) {
-            this.playOrdinaryState(pet);
+            this.finishLanding();
         } else {
-            this.beginJump(pet);
+            this.beginAirborne({ x: 0, y: this.profile.behavior.movement.speed });
         }
     }
 
@@ -328,26 +766,44 @@ export default class Pets extends Phaser.Scene {
             transitions.wallToClimb &&
             (left || right)
         ) {
-            const centers = this.getCenters(pet);
-            pet.setX(left ? centers.left : centers.right);
+            this.climbSide = left ? "left" : "right";
             this.setPetLookToTheLeft(pet, left);
+            this.setMechanicalState("climbing");
             this.switchRole(pet, "climb");
             return;
         }
 
         if (down) {
+            this.setMechanicalState("grounded");
             this.toggleFlipXThenUpdateDirection(pet);
         } else {
-            this.beginJump(pet);
+            this.beginAirborne({ x: 0, y: this.profile.behavior.movement.speed });
         }
     }
 
-    private clampPetInsideWorkArea(pet: Pet): void {
-        const centers = this.getCenters(pet);
-        pet.setPosition(
-            Phaser.Math.Clamp(pet.x, centers.left, centers.right),
-            Phaser.Math.Clamp(pet.y, centers.top, centers.bottom),
+    private clampedBodyPosition(body: MatterJS.BodyType): Vector {
+        return clampBodyCenterToRectangle(
+            body.position,
+            this.getBodyHalfExtents(body),
+            this.geometry.workArea,
         );
+    }
+
+    private getBodyHalfExtents(body: MatterJS.BodyType): Vector {
+        return {
+            x: (body.bounds.max.x - body.bounds.min.x) / 2,
+            y: (body.bounds.max.y - body.bounds.min.y) / 2,
+        };
+    }
+
+    private clearContactsForBody(bodyId: number): void {
+        for (const samples of [this.activeContactSamples, this.pendingImpactSamples]) {
+            for (const [pairId, sample] of samples) {
+                if (sample.bodyAId === bodyId || sample.bodyBId === bodyId) {
+                    samples.delete(pairId);
+                }
+            }
+        }
     }
 
     private switchRole(
@@ -374,7 +830,7 @@ export default class Pets extends Phaser.Scene {
     private updateStateDirection(pet: Pet, role: EngineRole): void {
         switch (role) {
             case "walk":
-                this.updateDirection(pet, pet.scaleX < 0 ? Direction.LEFT : Direction.RIGHT);
+                this.updateDirection(pet, pet.flipX ? Direction.LEFT : Direction.RIGHT);
                 break;
             case "jump":
                 this.toggleFlipX(pet);
@@ -386,7 +842,7 @@ export default class Pets extends Phaser.Scene {
             case "crawl":
                 this.updateDirection(
                     pet,
-                    pet.scaleX > 0 ? Direction.UPSIDELEFT : Direction.UPSIDERIGHT,
+                    pet.flipX ? Direction.UPSIDELEFT : Direction.UPSIDERIGHT,
                 );
                 break;
             default:
@@ -396,50 +852,28 @@ export default class Pets extends Phaser.Scene {
 
     private updateDirection(pet: Pet, direction: Direction): void {
         pet.direction = direction;
-        const { speed, acceleration } = this.profile.behavior.movement;
         switch (direction) {
             case Direction.RIGHT:
-                pet.setVelocity(speed, 0).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, false);
                 break;
             case Direction.LEFT:
-                pet.setVelocity(-speed, 0).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, true);
                 break;
-            case Direction.UP:
-                pet.setVelocity(0, -speed).setAcceleration(0);
-                break;
-            case Direction.DOWN:
-                pet.setVelocity(0, speed).setAcceleration(0, acceleration);
-                break;
             case Direction.UPSIDELEFT:
-                pet.setVelocity(-speed, -speed).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, true);
                 break;
             case Direction.UPSIDERIGHT:
-                pet.setVelocity(speed, -speed).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, false);
                 break;
-            default:
-                pet.setVelocity(0).setAcceleration(0);
         }
-
-        const surfaceMovement = [
-            Direction.UP,
-            Direction.UPSIDELEFT,
-            Direction.UPSIDERIGHT,
-        ].includes(direction);
-        pet.body.setAllowGravity(!surfaceMovement);
-        if (direction === Direction.UP) pet.setVelocityX(0);
     }
 
     private setPetLookToTheLeft(pet: Pet, left: boolean): void {
-        if ((left && pet.scaleX > 0) || (!left && pet.scaleX < 0)) this.toggleFlipX(pet);
+        if (pet.flipX !== left) pet.setFlipX(left);
     }
 
     private toggleFlipX(pet: Pet): void {
-        pet.scaleX > 0 ? pet.setOffset(pet.width, 0) : pet.setOffset(0, 0);
-        pet.setScale(-pet.scaleX, pet.scaleY);
+        pet.setFlipX(!pet.flipX);
     }
 
     private toggleFlipXThenUpdateDirection(pet: Pet): void {
@@ -455,16 +889,25 @@ export default class Pets extends Phaser.Scene {
     }
 
     private getCenters(pet: Pet) {
-        return getSpriteCentersInsideBounds(this.geometry.workArea, pet);
+        const halfExtents = this.getBodyHalfExtents(pet.body);
+        const bounds = this.geometry.workArea;
+        return {
+            left: bounds.x + halfExtents.x,
+            right: bounds.x + bounds.width - halfExtents.x,
+            top: bounds.y + halfExtents.y,
+            bottom: bounds.y + bounds.height - halfExtents.y,
+        };
     }
 
     private getBounds(pet: Pet): Record<"up" | "down" | "left" | "right", boolean> {
-        const centers = this.getCenters(pet);
+        const bounds = this.geometry.workArea;
         return {
-            up: pet.y <= centers.top,
-            down: pet.y >= centers.bottom,
-            left: pet.x <= centers.left,
-            right: pet.x >= centers.right,
+            up: pet.body.bounds.min.y <= bounds.y + BOUNDS_EPSILON,
+            down:
+                pet.body.bounds.max.y >= bounds.y + bounds.height - BOUNDS_EPSILON,
+            left: pet.body.bounds.min.x <= bounds.x + BOUNDS_EPSILON,
+            right:
+                pet.body.bounds.max.x >= bounds.x + bounds.width - BOUNDS_EPSILON,
         };
     }
 }
