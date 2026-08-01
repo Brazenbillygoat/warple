@@ -1,41 +1,35 @@
 <div align="center">
     <img width="180" src="./public/media/icon.png" alt="Warple">
     <h1 align="center">Warple</h1>
-    <p align="center">
-        A little desktop companion that wanders, rests, climbs, and hangs out without trying to become your full-time job.
-    </p>
+    <p align="center">A little desktop companion that wanders, rests, climbs, and hangs out without trying to become your full-time job.</p>
     <img src="https://img.shields.io/badge/Windows-0078D6?style=flat&logo=windows&logoColor=white" alt="Windows">
-    <img src="https://img.shields.io/badge/macOS-adb8c5?style=flat&logo=macos&logoColor=white" alt="macOS">
+    <img src="https://img.shields.io/badge/macOS-adb8c5?style=flat&logo=macos" alt="macOS">
     <img src="https://img.shields.io/badge/Linux-1793D1?style=flat&logo=linux&logoColor=white" alt="Linux">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </div>
 
-## ✨ What is Warple?
+## What is Warple?
 
-Warple is a transparent desktop-pet overlay built with Tauri, React, and Phaser. The current app can run multiple animated pets, load custom sprite sheets, react to the cursor, and stay out of the way when it is not being touched.
+Warple is a manually launched, tray-resident desktop companion built with Tauri, React, and Phaser. It loads one built-in, versioned, validated `CompanionProfile` and renders one companion inside the primary display's usable work area.
 
-The longer-term goal is a subtle creature with a recognizable personality rather than a random animation machine or a notification system with legs. We are building toward that carefully. AI features, activity tracking, persistent behavioral memory, and broad computer access are not part of the current app. Not sure they will be but I have an eye toward them.
+The current placeholder companion is Blooky, adapted from the fully animated definition and artwork bundled by upstream WindowPet. Its [existing source page](https://undertaleshimejis.tumblr.com/post/140301252826/thank-you-for-6000-followers-here-i-present?is_related_post=1) remains credited. Blooky is not original Warple artwork or the project's permanent visual identity.
 
-Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by [SeakMengs](https://github.com/SeakMengs). WindowPet provided the original application, pet engine, settings interface, and bundled pet collection. That work remains credited and is being phased into Warple over time instead of being passed off as original work.
+Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by [SeakMengs](https://github.com/SeakMengs). WindowPet provided the original application and pet engine. That work remains credited while the current project's application-owned identity uses Warple.
 
-## ✨ Features
+## Current behavior
 
-- Transparent, click-through desktop overlay
-- Multiple pets on screen at once
-- 50 bundled pet configurations
-- Custom PNG sprite-sheet import
-- Configurable animation states such as idle, walk, sit, jump, fall, climb, crawl, and drag
-- Dragging, climbing, bouncing, and edge-aware movement when supported by the pet
-- Pet scaling, interaction, climbing, taskbar, theme, and language settings
-- System-tray controls for showing, pausing, restarting, opening settings, and quitting
-- Local-only pet and settings data
-- Narrow Tauri permissions for the pet overlay and settings window
+- Starts only when the user launches it; no operating-system autostart
+- Runs one Blooky companion on the operating system's primary display
+- Keeps the companion inside the display's complete usable work area
+- Supports calm weighted states, walking, dragging and throwing, falling, climbing, and crawling
+- Uses a click-through transparent overlay that accepts input only over visible companion pixels
+- Exposes only `Show/Resume`, `Pause`, `Restart`, and `Quit` through the tray
+- Keeps the tray alive while paused and treats a second launch as `Show/Resume`
+- Loads no settings files, custom pets, downloaded profiles, or general configuration UI
 
-Bundled character artwork comes from the original WindowPet collection and its listed creators. Individual pet configuration files preserve available source and creator credits. It is not original Warple artwork.
+The profile boundary is data-only. Profiles cannot execute code, choose paths or URLs for artwork, access files, open links, or request permissions. A future profile selector can build on this boundary, but downloads and selection UI are not implemented.
 
-Auto-start and automatic updates were removed during the Tauri 2 migration. If they return, they will be rebuilt deliberately rather than quietly regaining broad access.
-
-## ✨ Development
+## Development
 
 ### Requirements
 
@@ -44,84 +38,67 @@ Auto-start and automatic updates were removed during the Tauri 2 migration. If t
 - Rust `1.97.1`
 - The platform prerequisites from the [Tauri 2 guide](https://v2.tauri.app/start/prerequisites/)
 
-The Node and Rust versions are pinned in the repository.
+Install dependencies with `npm ci`.
 
-### Install
-
-```bash
-npm ci
-```
-
-### Run
+Run the desktop application only when interactive review is intended:
 
 ```bash
 npm run tauri -- dev
 ```
 
-Run commands from the repository root. Use the tray menu's **Quit** action for a graceful shutdown. `Ctrl+C` also stops development, but Windows may print forced-exit noise while closing the webview.
+Use the tray menu's `Quit` action for a graceful shutdown.
 
 ### Test and build
 
 ```bash
 npm test -- --run
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml --locked
+npm audit
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- build --debug
 ```
 
 The last command builds the desktop application and installers without launching Warple.
 
-Dependency work is kept in small, reviewable slices. See the [migration roadmap](docs/MIGRATION_ROADMAP.md) for the current order, risk, and reasoning.
-
-## ✨ How it fits together
+## Architecture
 
 ```text
-Saved pet and settings JSON
-        ↓
-React Query loads local data
-        ↓
-Zustand holds live settings and pet state
-        ↓
-PhaserWrapper passes pet configs into Phaser
-        ↓
-Pets scene creates animations, physics, and behavior
-        ↓
-Transparent Tauri desktop window
+Native primary-display geometry
+        -> hidden Tauri overlay
+        -> synchronous built-in profile validation
+        -> React mounts Phaser
+        -> one companion scene
+        -> one-shot startup_ready handshake
+        -> lifecycle tray and visible overlay
 ```
 
-- React and Mantine own the settings interface.
-- Zustand owns live frontend state.
-- Phaser owns sprites, animation, input hit testing, physics, and pet behavior.
-- Tauri owns windows, the tray, capabilities, and the native command boundary.
-- Rust owns validated local configuration paths, native cursor position, and desktop lifecycle work.
+- `src/profiles/` defines, validates, and selects the single built-in declarative profile.
+- `src/PhaserWrapper.tsx` passes the immutable profile and normalized geometry into Phaser.
+- `src/scenes/Pets.ts` owns the companion's animation, input, movement, and physics.
+- Tauri owns primary-display resolution, the serialized overlay lifecycle, the readiness handshake, the tray, and graceful exit behavior.
+- Rust exposes only startup signaling and native cursor position to the overlay.
 
-`src/scenes/Pets.ts` runs the real desktop population. `src/scenes/Pet.ts` is the single-pet preview used by settings.
+## Local data and safety
 
-## ✨ Local data and safety
+Warple does not read, create, migrate, or delete application configuration data. Existing Warple and legacy WindowPet configuration directories remain untouched. Native diagnostic logs use Tauri's standard log directory.
 
-Warple stores its data in the operating system's application-config directory under the existing `WindowPet` folder. That internal name is intentionally being phased out gradually.
+The overlay has no shell, filesystem, dialog, opener, screen-capture, network, process, or UI-control permission. Screen awareness or interaction would require a separate permission design and explicit review.
 
-The native layer accepts only:
+## Platform status
 
-- `settings.json`, `pets.json`, and `pet_linker.json`
-- `custom-pets/*.json`
-- `assets/*.png`
+Windows automated checks and installer builds have been verified locally. The release workflow is configured for Windows, Intel and Apple Silicon macOS, and Linux, but those release jobs and non-Windows runtime behavior still require verification.
 
-The pet overlay can read configuration and cursor position. The settings window can manage those validated paths and import a PNG explicitly selected by the user. It does not currently have general filesystem, shell, screen-capture, or UI-control access.
-
-## ✨ Platform status
-
-Windows development, tests, and installer builds have been verified locally. The release workflow is configured for Windows, Intel and Apple Silicon macOS, and Linux, but those GitHub release jobs have not yet been exercised in this fork.
-
-## ✨ Inspiration
+## Inspiration
 
 - [WindowPet](https://github.com/SeakMengs/WindowPet)
 - [vscode-pets](https://marketplace.visualstudio.com/items?itemName=tonybaloney.vscode-pets)
 - [Shimeji-ee Desktop Pet](https://kilkakon.com/shimeji/)
 - [DPET: Desktop Pet Engine](https://store.steampowered.com/app/1980920/DPET__Desktop_Pet_Engine/)
 
-## ✨ License
+## License
 
-Warple continues under the repository's MIT license. Original WindowPet code and assets retain their existing copyright and attribution.
+Warple continues under the repository's MIT license. Original WindowPet code and retained artwork keep their existing attribution.
 
 MIT License Copyright (c) 2023 Seakmeng

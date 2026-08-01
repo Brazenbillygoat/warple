@@ -18,47 +18,29 @@
     "category": "Productivity",
     "copyright": "Copyright (c) 2023 Seakmeng"
   },
-  "productName": "WindowPet",
-  "mainBinaryName": "WindowPet",
+  "productName": "Warple",
+  "mainBinaryName": "Warple",
   "version": "0.0.9",
-  "identifier": "WindowPet",
+  "identifier": "io.github.brazenbillygoat.warple",
   "app": {
     "withGlobalTauri": false,
     "security": {
-      "assetProtocol": {
-        "scope": ["$APPCONFIG/assets/**/*"],
-        "enable": true
-      },
       "csp": {
         "default-src": "'self'",
         "connect-src": "'self' ipc: http://ipc.localhost",
-        "font-src": "'self'",
-        "img-src": "'self' asset: https://asset.localhost data: blob:",
+        "img-src": "'self' data:",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'"
       },
       "devCsp": {
         "default-src": "'self'",
         "connect-src": "'self' ipc: http://ipc.localhost ws://localhost:1420",
-        "font-src": "'self'",
-        "img-src": "'self' asset: https://asset.localhost data: blob:",
+        "img-src": "'self' data:",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'"
       }
     },
-    "windows": [
-      {
-        "fullscreen": true,
-        "resizable": false,
-        "title": "WindowPet",
-        "width": 64,
-        "height": 64,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "useHttpsScheme": true
-      }
-    ],
+    "windows": [],
     "macOSPrivateApi": true
   }
 }

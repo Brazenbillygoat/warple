@@ -1,7 +1,0 @@
-.title {
-    background-color: var(--mantine-primary-color-light);
-
-    &:hover {
-        background-color: var(--mantine-primary-color-light-hover);
-    }
-}

@@ -1,195 +1,164 @@
-import { ISpriteConfig } from "../types/ISpriteConfig";
-import { useSettingStore } from "../hooks/useSettingStore";
-import { listen } from "@tauri-apps/api/event";
-import {
-    DispatchType,
-    EventType,
-    TRenderEventListener,
-} from "../types/IEvents";
-import {
-    Direction,
-    IWorldBounding,
-    ISwitchStateOptions,
-    Ease,
-} from "../types/IPet";
-import { info, error } from "@tauri-apps/plugin-log";
-import defaultSettings from "../../src-tauri/src/app/default/settings.json";
+import { error, info } from "@tauri-apps/plugin-log";
+import { ORDINARY_ROLES, type EngineRole, type ValidatedCompanionProfile } from "../profiles/types";
+import { selectWeightedOrdinaryRole } from "../profiles/weightedState";
+import type { OverlayGeometry, Rectangle } from "../runtime/geometry";
+import { calculateReleaseVelocity } from "../runtime/releaseVelocity";
+import { getSpriteCentersInsideBounds, selectWorldBoundaryAction } from "../runtime/worldBounds";
+import { Direction, Ease } from "../types/IPet";
 import { ConfigManager, InputManager } from "./manager";
 
+const RUNTIME_UPDATE_INTERVAL_MS = 1000 / 9;
+
 interface Pet extends Phaser.Types.Physics.Arcade.SpriteWithDynamicBody {
-    direction?: Direction;
-    availableStates: string[];
-    canPlayRandomState: boolean;
+    direction: Direction;
+    role: EngineRole;
     canRandomFlip: boolean;
-    id: string;
 }
 
-// This is the live desktop scene; the settings preview uses the smaller Pet scene.
+interface SceneRegistry {
+    readonly profile: ValidatedCompanionProfile;
+    readonly geometry: OverlayGeometry;
+    readonly startupReady: () => void;
+    readonly startupAbort: () => void;
+}
+
 export default class Pets extends Phaser.Scene {
-    private pets: Pet[] = [];
-    private isFlipped: boolean = false;
-    private frameCount: number = 0;
-    // Track climbers separately so the update loop only checks pets that need wall behavior.
-    private petClimbAndCrawlIndex: number[] = [];
-
-    private configManager: ConfigManager;
-    private inputManager: InputManager;
-
-    private allowPetInteraction: boolean;
-    private allowPetAboveTaskbar: boolean;
-    private allowOverridePetScale: boolean;
-    private petScale: number;
-    private allowPetClimbing: boolean;
-
-    private readonly FORBIDDEN_RAND_STATE: string[] = [
-        "fall",
-        "climb",
-        "drag",
-        "crawl",
-        "drag",
-        "bounce",
-        "jump",
-    ];
-    private readonly FRAME_RATE: number = 9;
-    private readonly UPDATE_DELAY: number = 1000 / this.FRAME_RATE;
-    private readonly PET_MOVE_VELOCITY: number = this.FRAME_RATE * 6;
-    private readonly PET_MOVE_ACCELERATION: number = this.PET_MOVE_VELOCITY * 2;
-    private readonly TWEEN_ACCELERATION: number = this.FRAME_RATE * 1.1;
-    private readonly RAND_STATE_DELAY: number = 3000;
-    private readonly FLIP_DELAY: number = 5000;
+    private profile!: ValidatedCompanionProfile;
+    private geometry!: OverlayGeometry;
+    private configManager!: ConfigManager;
+    private inputManager!: InputManager;
+    private pet: Pet | undefined;
+    private frameElapsedMs = 0;
+    private nextOrdinaryTransitionAt = 0;
+    private startupFailed = false;
 
     constructor() {
         super({ key: "Pets" });
-
-        // Read settings here because Phaser has not created scene systems such as input yet.
-        this.allowPetInteraction =
-            useSettingStore.getState().allowPetInteraction ??
-            defaultSettings.allowPetInteraction;
-        this.allowPetAboveTaskbar =
-            useSettingStore.getState().allowPetAboveTaskbar ??
-            defaultSettings.allowPetAboveTaskbar;
-        this.allowOverridePetScale =
-            useSettingStore.getState().allowOverridePetScale ??
-            defaultSettings.allowOverridePetScale;
-        this.petScale =
-            useSettingStore.getState().petScale ?? defaultSettings.petScale;
-        this.allowPetClimbing =
-            useSettingStore.getState().allowPetClimbing ??
-            defaultSettings.allowPetClimbing;
-
-        this.configManager = new ConfigManager({
-            FRAME_RATE: this.FRAME_RATE,
-        });
-        this.inputManager = new InputManager();
     }
 
     preload(): void {
-        this.configManager.setConfigManager({
-            load: this.load,
-            textures: this.textures,
-            anims: this.anims,
+        const registry = this.readRegistry();
+        this.profile = registry.profile;
+        this.geometry = registry.geometry;
+        this.configManager = new ConfigManager(this.profile);
+        this.inputManager = new InputManager(this.geometry);
+        this.configManager.setManagers({ load: this.load, anims: this.anims });
+        this.inputManager.setInputManager(this.input);
+        this.load.once(Phaser.Loader.Events.FILE_LOAD_ERROR, () => {
+            this.startupFailed = true;
+            registry.startupAbort();
         });
-
-        this.inputManager.setInputManager({ input: this.input });
-        const spriteConfig = this.game.registry.get("spriteConfig");
-        this.configManager.setSpriteConfig(spriteConfig);
-        this.configManager.loadAllSpriteSheet();
+        this.configManager.loadSpriteSheet();
     }
 
     create(): void {
-        this.inputManager.turnOnIgnoreCursorEvents();
-        this.physics.world.setBoundsCollision(true, true, true, true);
-        this.updatePetAboveTaskbar();
-
-        let i = 0;
-        for (const sprite of this.configManager.getSpriteConfig()) {
-            this.addPet(sprite, i);
-            i++;
+        if (this.startupFailed) return;
+        try {
+            this.configManager.registerAnimations();
+            this.applyWorkAreaBounds();
+            this.pet = this.createCompanion();
+            this.registerDragBehavior();
+            this.registerWorldBoundsBehavior();
+            this.startInitialBehavior();
+            this.readRegistry().startupReady();
+            info("Companion scene ready");
+        } catch (reason) {
+            error(`Companion scene startup failed: ${String(reason)}`);
+            this.readRegistry().startupAbort();
         }
+    }
 
-        // Dragging temporarily hands control from Arcade physics to the pointer and a release tween.
-        this.input.on(
-            "drag",
-            (pointer: any, pet: Pet, dragX: number, dragY: number) => {
-                pet.x = dragX;
-                pet.y = dragY;
+    update(_time: number, delta: number): void {
+        const pet = this.pet;
+        if (!pet) return;
 
-                if (
-                    pet.anims &&
-                    pet.anims.getName() !==
-                        this.configManager.getStateName("drag", pet)
-                ) {
-                    this.switchState(pet, "drag");
-                }
+        this.frameElapsedMs += delta;
+        if (this.frameElapsedMs < RUNTIME_UPDATE_INTERVAL_MS) return;
+        this.frameElapsedMs = 0;
 
-                // Disable the body so world bounds do not fight pointer-controlled positioning.
-                // @ts-ignore
-                if (pet.body!.enable) pet.body!.enable = false;
+        this.inputManager.checkIsMouseOverPet();
+        this.updateOrdinaryBehavior(pet);
+        this.updateClimbAndCrawlBehavior(pet);
+    }
 
-                // Face the pet toward the current drag direction.
-                if (pet.x > pet.input!.dragStartX) {
-                    if (this.isFlipped) {
-                        this.toggleFlipX(pet);
-                        this.isFlipped = false;
-                    }
-                } else {
-                    if (!this.isFlipped) {
-                        this.toggleFlipX(pet);
-                        this.isFlipped = true;
-                    }
-                }
-            }
-        );
+    private readRegistry(): SceneRegistry {
+        return {
+            profile: this.game.registry.get("profile") as ValidatedCompanionProfile,
+            geometry: this.game.registry.get("geometry") as OverlayGeometry,
+            startupReady: this.game.registry.get("startupReady") as () => void,
+            startupAbort: this.game.registry.get("startupAbort") as () => void,
+        };
+    }
 
-        this.input.on("dragend", (pointer: any, pet: Pet) => {
-            // Convert pointer velocity into a short throw before Arcade physics resumes.
-            this.tweens.add({
-                targets: pet,
-                x: pet.x + pointer.velocity.x * this.TWEEN_ACCELERATION,
-                y: pet.y + pointer.velocity.y * this.TWEEN_ACCELERATION,
-                duration: 600,
-                ease: Ease.QuartEaseOut,
-                onComplete: () => {
-                    // Restore collisions after the throw so the pet settles back inside the screen.
-                    if (!pet.body!.enable) {
-                        pet.body!.enable = true;
+    private applyWorkAreaBounds(): void {
+        const { x, y, width, height } = this.geometry.workArea;
+        this.physics.world.setBounds(x, y, width, height);
+        this.physics.world.setBoundsCollision(true, true, true, true);
+    }
 
-                        // Arcade clears velocity when re-enabled, so restore wall movement on the next tick.
-                        setTimeout(() => {
-                            switch (pet.anims.getName()) {
-                                case this.configManager.getStateName(
-                                    "climb",
-                                    pet
-                                ):
-                                    this.updateDirection(pet, Direction.UP);
-                                    break;
-                                case this.configManager.getStateName(
-                                    "crawl",
-                                    pet
-                                ):
-                                    this.updateDirection(
-                                        pet,
-                                        pet.scaleX === -1
-                                            ? Direction.UPSIDELEFT
-                                            : Direction.UPSIDERIGHT
-                                    );
-                                    break;
-                                default:
-                                    return;
-                            }
-                        }, 50);
-                    }
-                },
-            });
+    private createCompanion(): Pet {
+        const bounds = this.geometry.workArea;
+        const halfWidth = (this.profile.frame.frameWidth * this.profile.behavior.scale) / 2;
+        const halfHeight = (this.profile.frame.frameHeight * this.profile.behavior.scale) / 2;
+        const minX = Math.ceil(bounds.x + halfWidth);
+        const maxX = Math.floor(bounds.x + bounds.width - halfWidth);
+        const startX = Phaser.Math.Between(minX, Math.max(minX, maxX));
+        const startY = bounds.y + halfHeight;
+        const pet = this.physics.add
+            .sprite(startX, startY, this.profile.id)
+            .setScale(this.profile.behavior.scale)
+            .setInteractive({
+                draggable: this.profile.behavior.dragging.enabled,
+                pixelPerfect: true,
+            }) as Pet;
 
-            this.petBeyondScreenSwitchClimb(pet, {
-                up: this.getPetBoundTop(pet),
-                down: this.getPetBoundDown(pet),
-                left: this.getPetBoundLeft(pet),
-                right: this.getPetBoundRight(pet),
-            });
+        pet.setCollideWorldBounds(true, 0, 0, true);
+        pet.direction = Direction.UNKNOWN;
+        pet.role = "stand";
+        pet.canRandomFlip = true;
+        return pet;
+    }
+
+    private registerDragBehavior(): void {
+        if (!this.profile.behavior.dragging.enabled) return;
+
+        this.input.on("dragstart", (_pointer: unknown, pet: Pet) => {
+            pet.disableBody();
         });
 
+        this.input.on("drag", (_pointer: unknown, pet: Pet, dragX: number, dragY: number) => {
+            pet.setPosition(dragX, dragY);
+            this.switchRole(pet, "drag");
+
+            const dragStartX = pet.input?.dragStartX ?? pet.x;
+            this.setPetLookToTheLeft(pet, pet.x <= dragStartX);
+        });
+
+        this.input.on("dragend", (pointer: Phaser.Input.Pointer, pet: Pet) => {
+            const dragging = this.profile.behavior.dragging;
+            const transitions = this.profile.behavior.supportedTransitions;
+            this.clampPetInsideWorkArea(pet);
+
+            if (!transitions.dragToThrow) {
+                pet.enableBody(true, pet.x, pet.y);
+                this.recoverAfterInteraction(pet);
+                return;
+            }
+
+            const velocity = calculateReleaseVelocity(
+                pointer.velocity,
+                dragging.throwVelocityMultiplier,
+                dragging.maxThrowSpeed,
+            );
+            this.switchRole(pet, "jump");
+            pet.enableBody(true, pet.x, pet.y);
+            pet.body.setAllowGravity(true);
+            pet.setAcceleration(0, this.profile.behavior.movement.acceleration);
+            pet.setVelocity(velocity.x, velocity.y);
+        });
+    }
+
+    private registerWorldBoundsBehavior(): void {
         this.physics.world.on(
             "worldbounds",
             (
@@ -197,711 +166,309 @@ export default class Pets extends Phaser.Scene {
                 up: boolean,
                 down: boolean,
                 left: boolean,
-                right: boolean
+                right: boolean,
             ) => {
                 const pet = body.gameObject as Pet;
-                // Crawlers leave the ceiling when they reach either side wall.
-                if (
-                    pet.anims &&
-                    pet.anims.getName() ===
-                        this.configManager.getStateName("crawl", pet)
-                ) {
-                    if (left || right) {
-                        this.petJumpOrPlayRandomState(pet);
-                    }
-                    return;
+                const transitions = this.profile.behavior.supportedTransitions;
+                const action = selectWorldBoundaryAction(
+                    pet.role,
+                    { up, down, left, right },
+                    transitions.crawlEdgeToJump,
+                    this.profile.behavior.climbing.enabled && transitions.climbToCrawl,
+                );
+
+                switch (action) {
+                    case "crawl-edge-jump":
+                        this.beginJump(pet);
+                        break;
+                    case "ceiling-crawl":
+                        this.switchRole(pet, "crawl");
+                        break;
+                    case "ceiling-fall":
+                        this.beginJump(pet);
+                        break;
+                    case "landing":
+                        this.finishLanding(pet);
+                        break;
+                    case "side":
+                        this.handleSideBoundary(pet, left, right, down);
+                        break;
                 }
-
-                if (up) {
-                    if (!this.allowPetClimbing) {
-                        this.petJumpOrPlayRandomState(pet);
-                        return;
-                    }
-
-                    if (pet.availableStates.includes("crawl")) {
-                        this.switchState(pet, "crawl");
-                        return;
-                    }
-                    this.petJumpOrPlayRandomState(pet);
-                } else if (down) {
-                    this.switchStateAfterPetJump(pet);
-                    this.petOnTheGroundPlayRandomState(pet);
-                }
-
-                // Boundary recovery also handles pets released outside the visible world.
-                this.petBeyondScreenSwitchClimb(pet, {
-                    up: up,
-                    down: down,
-                    left: left,
-                    right: right,
-                });
-            }
+            },
         );
-
-        // Settings live in another webview, so apply its events directly to the active scene.
-        listen<TRenderEventListener["payload"]>(
-            EventType.SettingWindowToPetOverlay,
-            (event) => {
-                switch (event.payload.dispatchType) {
-                    case DispatchType.SwitchAllowPetInteraction:
-                        this.allowPetInteraction = event.payload
-                            .value as boolean;
-                        break;
-                    case DispatchType.SwitchPetAboveTaskbar:
-                        this.allowPetAboveTaskbar = event.payload
-                            .value as boolean;
-                        this.updatePetAboveTaskbar();
-
-                        // Re-evaluate movement after the floor expands to include the taskbar area.
-                        if (!this.allowPetAboveTaskbar) {
-                            this.pets.forEach((pet) => {
-                                this.petJumpOrPlayRandomState(pet);
-                            });
-                        }
-
-                        break;
-                    case DispatchType.AddPet:
-                        this.addPet(
-                            event.payload!.value as ISpriteConfig,
-                            this.pets.length
-                        );
-                        break;
-                    case DispatchType.RemovePet:
-                        this.removePet(event.payload.value as string);
-                        break;
-                    case DispatchType.OverridePetScale:
-                        this.allowOverridePetScale = event.payload
-                            .value as boolean;
-                        this.allowOverridePetScale
-                            ? this.scaleAllPets(this.petScale)
-                            : this.scaleAllPets(defaultSettings.petScale);
-                        break;
-                    case DispatchType.SwitchAllowPetClimbing:
-                        this.allowPetClimbing = event.payload.value as boolean;
-
-                        // Move current climbers into a legal state as soon as climbing is disabled.
-                        if (!this.allowPetClimbing) {
-                            this.pets.forEach((pet) => {
-                                this.petJumpOrPlayRandomState(pet);
-                            });
-                        }
-                        break;
-                    case DispatchType.ChangePetScale:
-                        this.petScale = event.payload.value as number;
-                        this.scaleAllPets(this.petScale);
-                        break;
-                    default:
-                        break;
-                }
-            }
-        );
-
-        info("Pets scene loaded");
     }
 
-    update(time: number, delta: number): void {
-        this.frameCount += delta;
-
-        if (this.frameCount >= this.UPDATE_DELAY) {
-            this.frameCount = 0;
-            if (this.allowPetInteraction) {
-                this.inputManager.checkIsMouseInOnPet();
-            }
-
-            this.randomJumpIfPetClimbAndCrawl();
+    private startInitialBehavior(): void {
+        if (this.profile.behavior.supportedTransitions.initialDrop) {
+            this.beginJump(this.pet!);
+        } else {
+            this.playOrdinaryState(this.pet!);
         }
     }
 
-    addPet(sprite: ISpriteConfig, index: number): void {
-        this.configManager.registerSpriteStateAnimation(sprite);
-
-        const randomX = Phaser.Math.Between(
-            100,
-            this.physics.world.bounds.width - 100
-        );
-        // New pets enter from above so their initial physics state looks intentional.
-        const petY = 0 + this.configManager.getFrameSize(sprite).frameHeight;
-        this.pets[index] = this.physics.add
-            .sprite(randomX, petY, sprite.name)
-            .setInteractive({
-                draggable: true,
-                pixelPerfect: true,
-            }) as Pet;
-
-        this.allowOverridePetScale
-            ? this.scalePet(this.pets[index], this.petScale)
-            : this.scalePet(this.pets[index], defaultSettings.petScale);
-
-        this.pets[index].setCollideWorldBounds(true, 0, 0, true);
-
-        // Keep raw state names on the instance while animation keys remain texture-namespaced.
-        this.pets[index].availableStates = Object.keys(sprite.states);
-        this.pets[index].canPlayRandomState = true;
-        this.pets[index].canRandomFlip = true;
-        this.pets[index].id = sprite.id as string;
-
-        this.petJumpOrPlayRandomState(this.pets[index]);
+    private beginJump(pet: Pet): void {
+        this.switchRole(pet, "jump");
     }
 
-    removePet(petId: string): void {
-        this.pets = this.pets.filter((pet: Pet, index: number) => {
-            if (pet.id === petId) {
-                pet.destroy();
-
-                const petsWithSameTexture = this.pets.filter(
-                    (pet: Pet) =>
-                        pet.texture.key === this.pets[index].texture.key
-                );
-
-                // Remove the shared texture only when this was its final pet instance.
-                if (petsWithSameTexture.length === 1) {
-                    this.textures.remove(pet.texture.key);
-                }
-
-                // Stop update-loop work for a climber that no longer exists.
-                if (this.petClimbAndCrawlIndex.includes(index)) {
-                    this.petClimbAndCrawlIndex =
-                        this.petClimbAndCrawlIndex.filter((i) => i !== index);
-                }
-                return false;
+    private finishLanding(pet: Pet): void {
+        const transitions = this.profile.behavior.supportedTransitions;
+        if (pet.role === "jump") {
+            if (transitions.jumpToFall) {
+                this.switchRole(pet, "fall", { repeat: 0 });
+                pet.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+                    if (pet.active && pet.role === "fall") this.playOrdinaryState(pet);
+                });
+            } else {
+                this.playOrdinaryState(pet);
             }
-            return true;
+            return;
+        }
+
+        if (
+            ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number]) &&
+            this.time.now >= this.nextOrdinaryTransitionAt
+        ) {
+            this.playOrdinaryState(pet);
+        }
+    }
+
+    private playOrdinaryState(pet: Pet): void {
+        const role = selectWeightedOrdinaryRole(
+            this.profile.behavior.ordinaryTransitions.weights,
+            Math.random(),
+        );
+        this.switchRole(pet, role);
+        this.nextOrdinaryTransitionAt =
+            this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
+    }
+
+    private updateOrdinaryBehavior(pet: Pet): void {
+        if (!ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number])) return;
+        if (!this.getBounds(pet).down) return;
+
+        if (this.time.now >= this.nextOrdinaryTransitionAt) this.playOrdinaryState(pet);
+
+        const flip = this.profile.behavior.flip;
+        if (!flip.enabled || !pet.canRandomFlip) return;
+        const sample = Phaser.Math.Between(0, flip.sampleMax);
+        if (sample < flip.triggerMin || sample > flip.triggerMax) return;
+
+        this.toggleFlipXThenUpdateDirection(pet);
+        pet.canRandomFlip = false;
+        window.setTimeout(() => {
+            if (pet.active) pet.canRandomFlip = true;
+        }, flip.cooldownMs);
+    }
+
+    private updateClimbAndCrawlBehavior(pet: Pet): void {
+        if (pet.role !== "climb" && pet.role !== "crawl") return;
+        const climbing = this.profile.behavior.climbing;
+        const jumpSample = Phaser.Math.Between(0, climbing.randomJumpSampleMax);
+        if (jumpSample === climbing.randomJumpTrigger) {
+            this.jumpFromSurface(pet);
+            return;
+        }
+
+        const pauseSample = Phaser.Math.Between(0, climbing.pauseSampleMax);
+        if (pauseSample > climbing.pauseTriggerMax || !pet.anims.isPlaying) return;
+        const pausedRole = pet.role;
+        pet.anims.pause();
+        this.updateDirection(pet, Direction.UNKNOWN);
+        pet.body.setAllowGravity(false);
+        window.setTimeout(() => {
+            if (!pet.active || pet.role !== pausedRole || pet.anims.isPlaying) return;
+            pet.anims.resume();
+            this.updateDirection(
+                pet,
+                pausedRole === "climb"
+                    ? Direction.UP
+                    : pet.scaleX < 0
+                      ? Direction.UPSIDELEFT
+                      : Direction.UPSIDERIGHT,
+            );
+        }, Phaser.Math.Between(climbing.pauseMinMs, climbing.pauseMaxMs));
+    }
+
+    private jumpFromSurface(pet: Pet): void {
+        const centers = this.getCenters(pet);
+        const targetX =
+            pet.role === "climb"
+                ? Phaser.Math.Between(Math.ceil(centers.left), Math.floor(centers.right))
+                : pet.x;
+        pet.body.enable = false;
+        this.switchRole(pet, "jump");
+        this.tweens.add({
+            targets: pet,
+            x: targetX,
+            y: centers.bottom,
+            duration: this.profile.behavior.climbing.jumpDurationMs,
+            ease: Ease.QuadEaseOut,
+            onComplete: () => {
+                pet.body.enable = true;
+                this.finishLanding(pet);
+            },
         });
     }
 
-    updateDirection(pet: Pet, direction: Direction): void {
-        pet.direction = direction;
-        this.updateMovement(pet);
+    private recoverAfterInteraction(pet: Pet): void {
+        const bounds = this.getBounds(pet);
+        if (bounds.left || bounds.right) {
+            this.handleSideBoundary(pet, bounds.left, bounds.right, bounds.down);
+        } else if (bounds.down) {
+            this.playOrdinaryState(pet);
+        } else {
+            this.beginJump(pet);
+        }
     }
 
-    updateStateDirection(pet: Pet, state: string): void {
-        let direction = Direction.UNKNOWN;
-
-        switch (state) {
-            case "walk":
-                // Signed scale is the source of truth for horizontal facing.
-                direction = pet.scaleX < 0 ? Direction.LEFT : Direction.RIGHT;
-                break;
-            case "jump":
-                // Flip each jump to vary the pet's landing direction.
-                this.toggleFlipX(pet);
-                direction = Direction.DOWN;
-                break;
-            case "climb":
-                direction = Direction.UP;
-                break;
-            case "crawl":
-                pet.scaleX > 0
-                    ? (direction = Direction.UPSIDELEFT)
-                    : (direction = Direction.UPSIDERIGHT);
-                break;
-            default:
-                direction = Direction.UNKNOWN;
-                break;
+    private handleSideBoundary(pet: Pet, left: boolean, right: boolean, down: boolean): void {
+        const transitions = this.profile.behavior.supportedTransitions;
+        if (
+            this.profile.behavior.climbing.enabled &&
+            transitions.wallToClimb &&
+            (left || right)
+        ) {
+            const centers = this.getCenters(pet);
+            pet.setX(left ? centers.left : centers.right);
+            this.setPetLookToTheLeft(pet, left);
+            this.switchRole(pet, "climb");
+            return;
         }
 
-        this.updateDirection(pet, direction);
+        if (down) {
+            this.toggleFlipXThenUpdateDirection(pet);
+        } else {
+            this.beginJump(pet);
+        }
     }
 
-    updateMovement(pet: Pet): void {
-        switch (pet.direction) {
+    private clampPetInsideWorkArea(pet: Pet): void {
+        const centers = this.getCenters(pet);
+        pet.setPosition(
+            Phaser.Math.Clamp(pet.x, centers.left, centers.right),
+            Phaser.Math.Clamp(pet.y, centers.top, centers.bottom),
+        );
+    }
+
+    private switchRole(
+        pet: Pet,
+        role: EngineRole,
+        options: { readonly repeat?: number; readonly delay?: number; readonly repeatDelay?: number } = {},
+    ): void {
+        try {
+            const animationKey = this.configManager.getAnimationKeyForRole(role);
+            if (pet.role === role && pet.anims.getName() === animationKey && pet.anims.isPlaying) return;
+            pet.role = role;
+            pet.anims.play({
+                key: animationKey,
+                repeat: options.repeat ?? -1,
+                delay: options.delay ?? 0,
+                repeatDelay: options.repeatDelay ?? 0,
+            });
+            this.updateStateDirection(pet, role);
+        } catch (reason) {
+            error(`Failed to switch companion state: ${String(reason)}`);
+        }
+    }
+
+    private updateStateDirection(pet: Pet, role: EngineRole): void {
+        switch (role) {
+            case "walk":
+                this.updateDirection(pet, pet.scaleX < 0 ? Direction.LEFT : Direction.RIGHT);
+                break;
+            case "jump":
+                this.toggleFlipX(pet);
+                this.updateDirection(pet, Direction.DOWN);
+                break;
+            case "climb":
+                this.updateDirection(pet, Direction.UP);
+                break;
+            case "crawl":
+                this.updateDirection(
+                    pet,
+                    pet.scaleX > 0 ? Direction.UPSIDELEFT : Direction.UPSIDERIGHT,
+                );
+                break;
+            default:
+                this.updateDirection(pet, Direction.UNKNOWN);
+        }
+    }
+
+    private updateDirection(pet: Pet, direction: Direction): void {
+        pet.direction = direction;
+        const { speed, acceleration } = this.profile.behavior.movement;
+        switch (direction) {
             case Direction.RIGHT:
-                pet.setVelocity(this.PET_MOVE_VELOCITY, 0);
-                pet.setAcceleration(0);
+                pet.setVelocity(speed, 0).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, false);
                 break;
             case Direction.LEFT:
-                pet.setVelocity(-this.PET_MOVE_VELOCITY, 0);
-                pet.setAcceleration(0);
+                pet.setVelocity(-speed, 0).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, true);
                 break;
             case Direction.UP:
-                pet.setVelocity(0, -this.PET_MOVE_VELOCITY);
-                pet.setAcceleration(0);
+                pet.setVelocity(0, -speed).setAcceleration(0);
                 break;
             case Direction.DOWN:
-                pet.setVelocity(0, this.PET_MOVE_VELOCITY);
-                pet.setAcceleration(0, this.PET_MOVE_ACCELERATION);
+                pet.setVelocity(0, speed).setAcceleration(0, acceleration);
                 break;
             case Direction.UPSIDELEFT:
-                pet.setVelocity(-this.PET_MOVE_VELOCITY);
-                pet.setAcceleration(0);
+                pet.setVelocity(-speed, -speed).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, true);
                 break;
             case Direction.UPSIDERIGHT:
-                pet.setVelocity(
-                    this.PET_MOVE_VELOCITY,
-                    -this.PET_MOVE_VELOCITY
-                );
-                pet.setAcceleration(0);
+                pet.setVelocity(speed, -speed).setAcceleration(0);
                 this.setPetLookToTheLeft(pet, false);
                 break;
-            case Direction.UNKNOWN:
-                pet.setVelocity(0);
-                pet.setAcceleration(0);
-                break;
             default:
-                pet.setVelocity(0);
-                pet.setAcceleration(0);
-                break;
+                pet.setVelocity(0).setAcceleration(0);
         }
 
-        // Wall and ceiling movement must opt out of downward gravity.
-        const isMovingUp = [
+        const surfaceMovement = [
             Direction.UP,
             Direction.UPSIDELEFT,
             Direction.UPSIDERIGHT,
-        ].includes(pet.direction as Direction);
-
-        // @ts-ignore
-        pet.body!.setAllowGravity(!isMovingUp);
-
-        if (pet.direction === Direction.UP) {
-            pet.setVelocityX(0);
-        }
+        ].includes(direction);
+        pet.body.setAllowGravity(!surfaceMovement);
+        if (direction === Direction.UP) pet.setVelocityX(0);
     }
 
-    switchState(
-        pet: Pet,
-        state: string,
-        options: ISwitchStateOptions = {
-            repeat: -1,
-            delay: 0,
-            repeatDelay: 0,
-        }
-    ): void {
-        try {
-            // Delayed transitions can outlive a destroyed pet, so treat missing animation state as cancellation.
-            if (!pet.anims) return;
-
-            // A live settings change can invalidate a queued climb or crawl transition.
-            if (!this.allowPetClimbing) {
-                if (state === "climb" || state === "crawl") return;
-            }
-
-            const animationKey = this.configManager.getStateName(state, pet);
-            if (pet.anims && pet.anims.getName() === animationKey) return;
-            if (!pet.availableStates.includes(state)) return;
-
-            pet.anims.play({
-                key: animationKey,
-                repeat: options.repeat,
-                delay: options.delay,
-                repeatDelay: options.repeatDelay,
-            });
-
-            if (state === "climb" || state === "crawl") {
-                this.petClimbAndCrawlIndex.push(this.pets.indexOf(pet));
-            } else {
-                this.petClimbAndCrawlIndex = this.petClimbAndCrawlIndex.filter(
-                    (index) => index !== this.pets.indexOf(pet)
-                );
-            }
-
-            this.updateStateDirection(pet, state);
-        } catch (err: any) {
-            error(err);
-        }
+    private setPetLookToTheLeft(pet: Pet, left: boolean): void {
+        if ((left && pet.scaleX > 0) || (!left && pet.scaleX < 0)) this.toggleFlipX(pet);
     }
 
-    setPetLookToTheLeft(pet: Pet, lookToTheLeft: boolean): void {
-        if (lookToTheLeft) {
-            if (pet.scaleX > 0) {
-                this.toggleFlipX(pet);
-            }
-            return;
-        }
-
-        if (pet.scaleX < 0) {
-            this.toggleFlipX(pet);
-        }
-    }
-
-    scalePet(pet: Pet, scaleValue: number): void {
-        const scaleX = pet.scaleX > 0 ? scaleValue : -scaleValue;
-        const scaleY = pet.scaleY > 0 ? scaleValue : -scaleValue;
-        pet.setScale(scaleX, scaleY);
-    }
-
-    scaleAllPets(scaleValue: number): void {
-        this.pets.forEach((pet) => {
-            this.scalePet(pet, scaleValue);
-
-            // Re-enter behavior so resized hitboxes do not remain embedded in a boundary.
-            this.petJumpOrPlayRandomState(pet);
-        });
-    }
-
-    toggleFlipX(pet: Pet): void {
-        // Use signed scale instead of flipX so the Arcade hitbox mirrors with the sprite.
+    private toggleFlipX(pet: Pet): void {
         pet.scaleX > 0 ? pet.setOffset(pet.width, 0) : pet.setOffset(0, 0);
-        pet.setScale(pet.scaleX * -1, pet.scaleY);
+        pet.setScale(-pet.scaleX, pet.scaleY);
     }
 
-    toggleFlipXThenUpdateDirection(pet: Pet): void {
+    private toggleFlipXThenUpdateDirection(pet: Pet): void {
         this.toggleFlipX(pet);
-
-        switch (pet.direction) {
-            case Direction.RIGHT:
-                this.updateDirection(pet, Direction.LEFT);
-                break;
-            case Direction.LEFT:
-                this.updateDirection(pet, Direction.RIGHT);
-                break;
-            case Direction.UPSIDELEFT:
-                this.updateDirection(pet, Direction.UPSIDERIGHT);
-                break;
-            case Direction.UPSIDERIGHT:
-                this.updateDirection(pet, Direction.UPSIDELEFT);
-                break;
-            default:
-                break;
-        }
+        const opposite: Partial<Record<Direction, Direction>> = {
+            [Direction.RIGHT]: Direction.LEFT,
+            [Direction.LEFT]: Direction.RIGHT,
+            [Direction.UPSIDELEFT]: Direction.UPSIDERIGHT,
+            [Direction.UPSIDERIGHT]: Direction.UPSIDELEFT,
+        };
+        const direction = opposite[pet.direction];
+        if (direction) this.updateDirection(pet, direction);
     }
 
-    getOneRandomState(pet: Pet): string {
-        let randomStateIndex;
-
-        do {
-            randomStateIndex = Phaser.Math.Between(
-                0,
-                pet.availableStates.length - 1
-            );
-        } while (
-            this.FORBIDDEN_RAND_STATE.includes(
-                pet.availableStates[randomStateIndex]
-            )
-        );
-
-        return pet.availableStates[randomStateIndex];
+    private getCenters(pet: Pet) {
+        return getSpriteCentersInsideBounds(this.geometry.workArea, pet);
     }
 
-    getOneRandomStateByPet(pet: Pet): string {
-        return this.getOneRandomState(pet);
+    private getBounds(pet: Pet): Record<"up" | "down" | "left" | "right", boolean> {
+        const centers = this.getCenters(pet);
+        return {
+            up: pet.y <= centers.top,
+            down: pet.y >= centers.bottom,
+            left: pet.x <= centers.left,
+            right: pet.x >= centers.right,
+        };
     }
+}
 
-    playRandomState(pet: Pet): void {
-        if (!pet.canPlayRandomState) return;
-
-        this.switchState(pet, this.getOneRandomState(pet));
-        pet.canPlayRandomState = false;
-
-        // Rate-limit random transitions so short update intervals do not produce animation flicker.
-        setTimeout(() => {
-            pet.canPlayRandomState = true;
-        }, this.RAND_STATE_DELAY);
-    }
-
-    switchStateAfterPetJump(pet: Pet): void {
-        if (!pet) return;
-        if (
-            pet.anims &&
-            pet.anims.getName() !== this.configManager.getStateName("jump", pet)
-        )
-            return;
-
-        if (pet.availableStates.includes("fall")) {
-            this.switchState(pet, "fall", {
-                repeat: 0,
-            });
-
-            // Let a one-shot landing animation finish before normal behavior resumes.
-            pet.canPlayRandomState = false;
-            pet.on("animationcomplete", () => {
-                pet.canPlayRandomState = true;
-                this.playRandomState(pet);
-            });
-
-            return;
-        }
-        this.playRandomState(pet);
-    }
-
-    getPetGroundPosition(pet: Pet): number {
-        return (
-            this.physics.world.bounds.height -
-            pet.height * Math.abs(pet.scaleY) * pet.originY
-        );
-    }
-
-    getPetTopPosition(pet: Pet): number {
-        return pet.height * Math.abs(pet.scaleY) * pet.originY;
-    }
-
-    getPetLeftPosition(pet: Pet): number {
-        return pet.width * Math.abs(pet.scaleX) * pet.originX;
-    }
-
-    getPetRightPosition(pet: Pet): number {
-        return (
-            this.physics.world.bounds.width -
-            pet.width * Math.abs(pet.scaleX) * pet.originX
-        );
-    }
-
-    getPetBoundDown(pet: Pet): boolean {
-        // Boundary checks use scaled dimensions because users can resize every pet.
-        return pet.y >= this.getPetGroundPosition(pet);
-    }
-
-    getPetBoundLeft(pet: Pet): boolean {
-        return pet.x <= this.getPetLeftPosition(pet);
-    }
-
-    getPetBoundRight(pet: Pet): boolean {
-        return pet.x >= this.getPetRightPosition(pet);
-    }
-
-    getPetBoundTop(pet: Pet): boolean {
-        return pet.y <= this.getPetTopPosition(pet);
-    }
-
-    updatePetAboveTaskbar(): void {
-        if (this.allowPetAboveTaskbar) {
-            // availHeight excludes the taskbar, which becomes the overlay's effective floor.
-            const taskbarHeight =
-                window.screen.height - window.screen.availHeight;
-
-            this.physics.world.setBounds(
-                0,
-                0,
-                window.screen.width,
-                window.screen.height - taskbarHeight
-            );
-            return;
-        }
-
-        this.physics.world.setBounds(
-            0,
-            0,
-            window.screen.width,
-            window.screen.height
-        );
-    }
-
-    petJumpOrPlayRandomState(pet: Pet): void {
-        if (!pet) return;
-
-        if (pet.availableStates.includes("jump")) {
-            this.switchState(pet, "jump");
-            return;
-        }
-
-        this.switchState(pet, this.getOneRandomState(pet));
-    }
-
-    petOnTheGroundPlayRandomState(pet: Pet): void {
-        if (!pet) {
-            return;
-        }
-
-        switch (pet.anims.getName()) {
-            case this.configManager.getStateName("climb", pet):
-                return;
-            case this.configManager.getStateName("crawl", pet):
-                return;
-            case this.configManager.getStateName("drag", pet):
-                return;
-            case this.configManager.getStateName("jump", pet):
-                return;
-        }
-
-        const random = Phaser.Math.Between(0, 2000);
-        if (
-            pet.anims &&
-            pet.anims.getName() === this.configManager.getStateName("walk", pet)
-        ) {
-            // Walking pets occasionally idle, then resume after a short rest.
-            if (random >= 0 && random <= 5) {
-                this.switchState(pet, "idle");
-                setTimeout(() => {
-                    if (
-                        pet.anims &&
-                        pet.anims.getName() !==
-                            this.configManager.getStateName("idle", pet)
-                    )
-                        return;
-                    this.switchState(pet, "walk");
-                }, Phaser.Math.Between(3000, 6000));
-                return;
-            }
-        } else {
-            // Non-walking pets get more chances to transition so they do not stall indefinitely.
-            if (random >= 777 && random <= 800) {
-                this.playRandomState(pet);
-                return;
-            }
-        }
-
-        if (random >= 888 && random <= 890) {
-            // Keep spontaneous turns rare and rate-limited so movement does not jitter.
-            if (pet.canRandomFlip) {
-                this.toggleFlipXThenUpdateDirection(pet);
-                pet.canRandomFlip = false;
-
-                setTimeout(() => {
-                    pet.canRandomFlip = true;
-                }, this.FLIP_DELAY);
-            }
-        } else if (random >= 777 && random <= 780) {
-            this.playRandomState(pet);
-        } else if (random >= 170 && random <= 175) {
-            this.switchState(pet, "walk");
-        }
-    }
-
-    randomJumpIfPetClimbAndCrawl(): void {
-        if (this.petClimbAndCrawlIndex.length === 0) return;
-
-        for (const index of this.petClimbAndCrawlIndex) {
-            const pet = this.pets[index];
-            if (!pet) continue;
-
-            switch (pet.anims.getName()) {
-                case this.configManager.getStateName("drag", pet):
-                    continue;
-                case this.configManager.getStateName("jump", pet):
-                    continue;
-            }
-
-            const random = Phaser.Math.Between(0, 500);
-
-            if (random === 78) {
-                let newPetx = pet.x;
-                // Climbers jump away from their wall instead of dropping straight down.
-                if (
-                    pet.anims &&
-                    pet.anims.getName() ===
-                        this.configManager.getStateName("climb", pet)
-                ) {
-                    newPetx =
-                        pet.scaleX < 0
-                            ? Phaser.Math.Between(pet.x, 500)
-                            : Phaser.Math.Between(
-                                  pet.x,
-                                  this.physics.world.bounds.width - 500
-                              );
-                }
-
-                // Disable Arcade while the tween moves the pet so the two systems do not fight.
-                if (pet.body!.enable) pet.body!.enable = false;
-                this.switchState(pet, "jump");
-                this.tweens.add({
-                    targets: pet,
-                    x: newPetx,
-                    y: this.getPetGroundPosition(pet),
-                    duration: 3000,
-                    ease: Ease.QuadEaseOut,
-                    onComplete: () => {
-                        if (!pet.body!.enable) {
-                            pet.body!.enable = true;
-                            this.switchStateAfterPetJump(pet);
-                        }
-                    },
-                });
-                return;
-            }
-
-            // Climb and crawl animations occasionally pause so wall movement feels less mechanical.
-            if (random >= 0 && random <= 5) {
-                if (
-                    pet.anims &&
-                    pet.anims.getName() ===
-                        this.configManager.getStateName("climb", pet)
-                ) {
-                    pet.anims.pause();
-                    this.updateDirection(pet, Direction.UNKNOWN);
-                    // @ts-ignore
-                    pet.body!.allowGravity = false;
-                    setTimeout(() => {
-                        if (pet.anims && !pet.anims.isPlaying) {
-                            pet.anims.resume();
-                            this.updateDirection(pet, Direction.UP);
-                        }
-                    }, Phaser.Math.Between(3000, 6000));
-                    return;
-                } else if (
-                    pet.anims &&
-                    pet.anims.getName() ===
-                        this.configManager.getStateName("crawl", pet)
-                ) {
-                    pet.anims.pause();
-                    this.updateDirection(pet, Direction.UNKNOWN);
-                    // @ts-ignore
-                    pet.body!.allowGravity = false;
-                    setTimeout(() => {
-                        if (pet.anims && !pet.anims.isPlaying) {
-                            pet.anims.resume();
-                            this.updateDirection(
-                                pet,
-                                pet.scaleX < 0
-                                    ? Direction.UPSIDELEFT
-                                    : Direction.UPSIDERIGHT
-                            );
-                        }
-                    }, Phaser.Math.Between(3000, 6000));
-                    return;
-                }
-            }
-        }
-    }
-
-    petBeyondScreenSwitchClimb(pet: Pet, worldBounding: IWorldBounding): void {
-        if (!pet) return;
-
-        // Climb and crawl already own their boundary behavior until another transition occurs.
-        switch (pet.anims.getName()) {
-            case this.configManager.getStateName("climb", pet):
-                return;
-            case this.configManager.getStateName("crawl", pet):
-                return;
-        }
-
-        if (worldBounding.left || worldBounding.right) {
-            if (
-                pet.availableStates.includes("climb") &&
-                this.allowPetClimbing
-            ) {
-                this.switchState(pet, "climb");
-
-                const lastPetX = pet.x;
-                if (worldBounding.left) {
-                    // Correct the center-based X position so a dragged pet aligns with the left wall.
-                    pet.setPosition(
-                        lastPetX - this.getPetLeftPosition(pet),
-                        pet.y
-                    );
-                    this.setPetLookToTheLeft(pet, true);
-                } else {
-                    pet.setPosition(
-                        lastPetX + this.getPetRightPosition(pet),
-                        pet.y
-                    );
-                    this.setPetLookToTheLeft(pet, false);
-                }
-            } else {
-                if (worldBounding.down) {
-                    // Grounded pets without climbing turn back into the visible world.
-                    this.toggleFlipXThenUpdateDirection(pet);
-                } else {
-                    // Airborne pets without climbing fall back to a supported transition.
-                    this.petJumpOrPlayRandomState(pet);
-                }
-            }
-        } else {
-            if (worldBounding.down) {
-                // A pet released safely on the ground can resume ordinary behavior.
-                if (
-                    pet.anims &&
-                    pet.anims.getName() ===
-                        this.configManager.getStateName("drag", pet)
-                ) {
-                    this.switchState(pet, this.getOneRandomState(pet));
-                }
-            } else {
-                // A pet released in open air needs a supported transition back to the ground.
-                this.petJumpOrPlayRandomState(pet);
-            }
-        }
-    }
+export function getWorldBounds(geometry: OverlayGeometry): Rectangle {
+    return geometry.workArea;
 }
