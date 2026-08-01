@@ -1,4 +1,3 @@
 pub mod cmd;
-pub mod conf;
+pub mod lifecycle;
 pub mod tray;
-pub mod utils;

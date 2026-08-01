@@ -1,48 +1,41 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import Phaser from "phaser";
-import Pets from "./scenes/Pets";
-import { useSettingStore } from "./hooks/useSettingStore";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-const appWindow = getCurrentWebviewWindow()
+import type { ValidatedCompanionProfile } from "./profiles/types";
+import type { OverlayGeometry } from "./runtime/geometry";
+import Pets from "./scenes/Pets";
 
-// React owns pet data while Phaser owns rendering, and the game registry is their handoff.
-function PhaserWrapper() {
-    const phaserDom = useRef<HTMLDivElement>(null);
-    const { pets } = useSettingStore();
+interface PhaserWrapperProps {
+    readonly profile: ValidatedCompanionProfile;
+    readonly geometry: OverlayGeometry;
+    readonly onReady: () => void;
+    readonly onAbort: () => void;
+}
 
-    const [screenWidth, setScreenWidth] = useState(window.screen.width);
-    const [screenHeight, setScreenHeight] = useState(window.screen.height);
+function PhaserWrapper({ profile, geometry, onReady, onAbort }: PhaserWrapperProps) {
+    const phaserHost = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (!phaserDom.current) return;
+        if (!phaserHost.current) return;
+        void getCurrentWebviewWindow().setIgnoreCursorEvents(true).catch(onAbort);
 
-        const handleResize = () => {
-            setScreenWidth(window.screen.width);
-            setScreenHeight(window.screen.height);
-        };
-
-        window.addEventListener("resize", handleResize);
-
-        // Reset click-through because Phaser may have temporarily enabled pointer input before remounting.
-        appWindow.setIgnoreCursorEvents(true);
-
-        const phaserConfig: Phaser.Types.Core.GameConfig = {
+        const game = new Phaser.Game({
             type: Phaser.AUTO,
-            parent: phaserDom.current,
-            backgroundColor: '#ffffff0',
+            parent: phaserHost.current,
+            backgroundColor: "#00000000",
             transparent: true,
             roundPixels: true,
             antialias: true,
             scale: {
                 mode: Phaser.Scale.ScaleModes.RESIZE,
-                width: screenWidth,
-                height: screenHeight,
+                width: geometry.monitor.width,
+                height: geometry.monitor.height,
             },
             physics: {
-                default: 'arcade',
+                default: "arcade",
                 arcade: {
                     debug: false,
-                    gravity: { y: 200, x: 0},
+                    gravity: profile.behavior.gravity,
                 },
             },
             fps: {
@@ -51,33 +44,24 @@ function PhaserWrapper() {
                 smoothStep: true,
             },
             scene: [Pets],
-            audio: {
-                noAudio: true,
-            },
+            audio: { noAudio: true },
             callbacks: {
-                preBoot: (game) => {
-                    // The Pets scene reads this snapshot during preload before creating desktop sprites.
-                    game.registry.set('spriteConfig', pets);
-                }
-            }
-        }
-
-        const game = new Phaser.Game(phaserConfig);
+                preBoot: (bootingGame) => {
+                    bootingGame.registry.set("profile", profile);
+                    bootingGame.registry.set("geometry", geometry);
+                    bootingGame.registry.set("startupReady", onReady);
+                    bootingGame.registry.set("startupAbort", onAbort);
+                },
+            },
+        });
 
         return () => {
-            // Phaser owns the canvas, so destroy the game before React clears its host node.
             game.destroy(true);
-            if (phaserDom.current !== null) phaserDom.current.innerHTML = '';
-            window.removeEventListener("resize", handleResize);
-        }
+            if (phaserHost.current) phaserHost.current.innerHTML = "";
+        };
+    }, [geometry, onAbort, onReady, profile]);
 
-    }, [pets, screenWidth, screenHeight]);
-
-    return (
-        <>
-            <div ref={phaserDom} />
-        </>
-    )
+    return <div id="phaser-container" ref={phaserHost} />;
 }
 
 export default PhaserWrapper;

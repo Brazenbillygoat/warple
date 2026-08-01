@@ -9,27 +9,6 @@ export enum Direction {
     UNKNOWN = 'UNKNOWN',
 }
 
-export interface IPet extends Phaser.Physics.Arcade.Sprite {
-    direction?: Direction;
-    availableStates: string[];
-    canPlayRandomState: boolean;
-    canRandomFlip: boolean;
-    id: string;
-}
-
-export interface IWorldBounding {
-    up: boolean;
-    down: boolean;
-    left: boolean;
-    right: boolean;
-}
-
-export interface ISwitchStateOptions {
-    repeat?: number,
-    delay?: number,
-    repeatDelay?: number,
-}
-
 // Values map directly to Phaser easing names accepted by tweens.
 export enum Ease {
     Power0 = "Linear",

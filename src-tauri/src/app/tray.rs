@@ -1,72 +1,45 @@
-use super::utils::{open_setting_window, reopen_main_window};
-use log::info;
+use log::{error, info};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Manager,
+    AppHandle, Manager,
 };
-use tauri_plugin_dialog::DialogExt;
 
-fn show_message(app: &AppHandle, message: &str) {
-    app.dialog()
-        .message(message)
-        .title("Warple Dialog")
-        .show(|_| {});
-}
+use super::lifecycle::{self, OverlayLifecycle};
 
-fn open_or_focus_setting_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("setting") {
-        let _ = window.set_focus();
-        show_message(app, "Warple settings already exist");
-    } else {
-        open_setting_window(app.clone());
-    }
-}
+pub const TRAY_ACTIONS: [(&str, &str); 4] = [
+    ("show_resume", "Show/Resume"),
+    ("pause", "Pause"),
+    ("restart", "Restart"),
+    ("quit", "Quit"),
+];
 
-fn handle_tray_menu_event(app: &AppHandle, id: &str) {
+fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
-        "show" => match app.get_webview_window("main") {
-            Some(window) => {
-                let _ = window.set_focus();
-                show_message(app, "Pet already exists");
-            }
-            None => {
-                tauri::async_runtime::spawn(reopen_main_window(app.clone()));
-            }
-        },
-        "pause" => match app.get_webview_window("main") {
-            Some(window) => {
-                window.close().expect("failed to close frontend window");
-            }
-            None => {
-                println!("Window not found");
-            }
-        },
-        "setting" => open_or_focus_setting_window(app),
+        "show_resume" => lifecycle::show_or_resume(app),
+        "pause" => lifecycle::pause(app),
         "restart" => {
-            info!("Restart Warple");
+            info!("Restarting Warple");
+            app.state::<OverlayLifecycle>().mark_explicit_exit();
             app.restart();
         }
         "quit" => {
-            info!("Quit Warple");
+            info!("Quitting Warple");
+            app.state::<OverlayLifecycle>().mark_explicit_exit();
             app.exit(0);
         }
-        _ => {}
+        _ => error!("Ignored unknown tray action"),
     }
 }
 
-pub fn init_system_tray(app: &mut App) -> tauri::Result<()> {
-    let show = MenuItemBuilder::with_id("show", "Show").build(app)?;
-    let pause = MenuItemBuilder::with_id("pause", "Pause (Free Memory)").build(app)?;
-    let setting = MenuItemBuilder::with_id("setting", "Setting").build(app)?;
-    let restart = MenuItemBuilder::with_id("restart", "Restart").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-
+pub fn init_system_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show_resume = MenuItemBuilder::with_id(TRAY_ACTIONS[0].0, TRAY_ACTIONS[0].1).build(app)?;
+    let pause = MenuItemBuilder::with_id(TRAY_ACTIONS[1].0, TRAY_ACTIONS[1].1).build(app)?;
+    let restart = MenuItemBuilder::with_id(TRAY_ACTIONS[2].0, TRAY_ACTIONS[2].1).build(app)?;
+    let quit = MenuItemBuilder::with_id(TRAY_ACTIONS[3].0, TRAY_ACTIONS[3].1).build(app)?;
     let menu = MenuBuilder::new(app)
-        .item(&show)
+        .item(&show_resume)
         .item(&pause)
-        .item(&setting)
-        .separator()
         .item(&restart)
         .item(&quit)
         .build()?;
@@ -74,21 +47,40 @@ pub fn init_system_tray(app: &mut App) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| handle_tray_menu_event(app, event.id().as_ref()))
+        .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::DoubleClick {
-                button: MouseButton::Left,
-                ..
-            } = event
-            {
-                open_or_focus_setting_window(tray.app_handle());
+            if matches!(
+                event,
+                TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                }
+            ) {
+                lifecycle::show_or_resume(tray.app_handle());
             }
         });
 
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
-
     tray.build(app)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tray_contains_only_the_lifecycle_actions() {
+        assert_eq!(
+            TRAY_ACTIONS,
+            [
+                ("show_resume", "Show/Resume"),
+                ("pause", "Pause"),
+                ("restart", "Restart"),
+                ("quit", "Quit"),
+            ]
+        );
+    }
 }

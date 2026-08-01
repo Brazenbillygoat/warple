@@ -1,6 +1,6 @@
 # Contributing to Warple
 
-Thank you for contributing. Keep changes focused, preserve upstream attribution, and avoid combining behavior work with dependency or identity migrations.
+Thank you for contributing. Keep changes focused, preserve upstream attribution, and avoid combining behavior work with unrelated dependency or compiler migrations.
 
 ## Set up a fork
 
@@ -42,6 +42,12 @@ npm run tauri -- dev
 ```
 
 Use the tray menu's **Quit** action for a graceful shutdown.
+
+## Product boundaries
+
+Warple currently runs one validated, built-in, data-only companion profile. Keep profile metadata, artwork identifiers, animation definitions, role mappings, and behavior values separate from Phaser mechanics. Do not add executable profiles, downloaded assets, a general settings window, autostart, filesystem or network access, screen capture, or UI control without an explicitly reviewed design.
+
+Retained Blooky artwork is credited upstream placeholder artwork, not original Warple artwork.
 
 ## Verification
 
