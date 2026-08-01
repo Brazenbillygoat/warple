@@ -1,4 +1,10 @@
 [[permission]]
 identifier = "companion-runtime"
-description = "Allows the companion overlay to complete its one-shot startup handshake and read native cursor position."
-commands.allow = ["get_mouse_position", "startup_ready", "abort_startup"]
+description = "Allows the companion overlay to complete startup and read native cursor and desktop environment observations."
+commands.allow = [
+    "get_mouse_position",
+    "get_desktop_environment",
+    "get_desktop_item_details",
+    "startup_ready",
+    "abort_startup",
+]

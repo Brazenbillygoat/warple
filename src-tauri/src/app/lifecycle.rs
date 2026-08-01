@@ -252,6 +252,8 @@ fn create_overlay(app: &AppHandle, launch_kind: LaunchKind) -> Result<bool, Stri
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
+        .focused(false)
+        .focusable(false)
         .skip_taskbar(true)
         .shadow(false)
         .visible(false)
@@ -272,6 +274,9 @@ fn create_overlay(app: &AppHandle, launch_kind: LaunchKind) -> Result<bool, Stri
             "failed to make companion overlay click-through: {reason}"
         ));
     }
+
+    #[cfg(all(debug_assertions, feature = "desktop-diagnostics"))]
+    window.open_devtools();
 
     let app_handle = app.clone();
     window.on_window_event(move |event| {

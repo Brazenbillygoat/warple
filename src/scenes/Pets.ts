@@ -10,7 +10,18 @@ import {
     type CursorAwarenessState,
     type HorizontalDirection,
 } from "../runtime/cursorAwareness";
+import type {
+    DesktopEnvironmentSnapshot,
+    ForegroundWindowCandidate,
+} from "../runtime/desktopEnvironment";
 import type { OverlayGeometry, Rectangle } from "../runtime/geometry";
+import {
+    cancelIconAwareness,
+    initialIconAwarenessState,
+    updateIconAwareness,
+    type IconAwarenessIntention,
+    type IconAwarenessState,
+} from "../runtime/iconAwareness";
 import {
     aggregateCollisionContacts,
     clampBodyCenterToRectangle,
@@ -22,6 +33,7 @@ import {
     pixelsPerSecondToMatterVelocity,
     pixelsPerSecondVectorToMatterVelocity,
     selectContactTransition,
+    shouldEnableOneWayPlatformCollision,
     suppressContactDirection,
     type AggregatedContacts,
     type CollisionSample,
@@ -30,7 +42,13 @@ import {
     type Vector,
 } from "../runtime/matterPolicy";
 import { calculateReleaseVelocity } from "../runtime/releaseVelocity";
+import {
+    initialWindowPlatformState,
+    updateWindowPlatform,
+    type WindowPlatformState,
+} from "../runtime/windowPlatform";
 import { Direction, Ease } from "../types/IPet";
+import { DesktopEnvironmentManager } from "./desktopEnvironmentManager";
 import { ConfigManager, InputManager } from "./manager";
 
 const RUNTIME_UPDATE_INTERVAL_MS = 1000 / 9;
@@ -44,7 +62,7 @@ const CATEGORY = Object.freeze({
     surface: 0x0002,
 });
 
-type SurfaceRole = "floor" | "ceiling" | "wall";
+type SurfaceRole = "floor" | "ceiling" | "wall" | "platform";
 type SurfaceEdge = "top" | "bottom" | "left" | "right";
 
 interface SurfaceDefinition {
@@ -76,6 +94,7 @@ export default class Pets extends Phaser.Scene {
     private geometry!: OverlayGeometry;
     private configManager!: ConfigManager;
     private inputManager!: InputManager;
+    private desktopEnvironmentManager!: DesktopEnvironmentManager;
     private pet: Pet | undefined;
     private state: MechanicalState = "airborne";
     private climbSide: "left" | "right" | undefined;
@@ -86,7 +105,12 @@ export default class Pets extends Phaser.Scene {
     private frameElapsedMs = 0;
     private nextOrdinaryTransitionAt = 0;
     private cursorAwarenessState: CursorAwarenessState = initialCursorAwarenessState();
+    private iconAwarenessState: IconAwarenessState = initialIconAwarenessState();
+    private windowPlatformState: WindowPlatformState = initialWindowPlatformState();
     private cursorGreetingCompletion: (() => void) | undefined;
+    private windowPlatformBody: MatterJS.BodyType | undefined;
+    private windowPlatformBounds: Rectangle | undefined;
+    private supportedSurfaceBodyId: number | undefined;
     private startupFailed = false;
     private surfaceJumpInProgress = false;
     private surfaceJumpTween: Phaser.Tweens.Tween | undefined;
@@ -101,6 +125,7 @@ export default class Pets extends Phaser.Scene {
         this.geometry = registry.geometry;
         this.configManager = new ConfigManager(this.profile);
         this.inputManager = new InputManager(this.geometry);
+        this.desktopEnvironmentManager = new DesktopEnvironmentManager(this.geometry);
         this.configManager.setManagers({ load: this.load, anims: this.anims });
         this.inputManager.setInputManager(this.input);
         this.load.once(Phaser.Loader.Events.FILE_LOAD_ERROR, () => {
@@ -140,8 +165,18 @@ export default class Pets extends Phaser.Scene {
         this.frameElapsedMs = 0;
 
         this.inputManager.checkIsMouseOverPet();
+        this.desktopEnvironmentManager.poll(this.time.now);
+        const desktopSnapshot = this.desktopEnvironmentManager.getLatestSnapshot(this.time.now);
+        this.updateWindowPlatformBehavior(pet, desktopSnapshot?.foregroundWindow);
         const cursorAwarenessOwnsBehavior = this.updateCursorAwarenessBehavior(pet);
-        if (!cursorAwarenessOwnsBehavior) this.updateOrdinaryBehavior(pet);
+        const iconAwarenessOwnsBehavior = this.updateIconAwarenessBehavior(
+            pet,
+            desktopSnapshot,
+            cursorAwarenessOwnsBehavior,
+        );
+        if (!cursorAwarenessOwnsBehavior && !iconAwarenessOwnsBehavior) {
+            this.updateOrdinaryBehavior(pet);
+        }
         this.updateClimbAndCrawlBehavior(pet);
     }
 
@@ -231,6 +266,77 @@ export default class Pets extends Phaser.Scene {
                 mask: CATEGORY.companion,
             },
         };
+    }
+
+    private updateWindowPlatformBehavior(
+        pet: Pet,
+        candidate: ForegroundWindowCandidate | undefined,
+    ): void {
+        const result = updateWindowPlatform(this.windowPlatformState, {
+            nowMs: this.time.now,
+            candidate,
+            workArea: this.geometry.workArea,
+            companionBounds: this.getBodyRectangle(pet.body),
+        });
+        this.windowPlatformState = result.state;
+        if (result.intention.type === "remove") {
+            this.removeWindowPlatform();
+        } else if (result.intention.type === "add") {
+            this.addWindowPlatform(result.intention.platform, result.intention.candidateId);
+        }
+    }
+
+    private addWindowPlatform(bounds: Rectangle, candidateId: string): void {
+        if (this.windowPlatformBody) return;
+        const label = `window-platform-${candidateId}`;
+        const body = this.matter.add.rectangle(
+            bounds.x + bounds.width / 2,
+            bounds.y + bounds.height / 2,
+            bounds.width,
+            bounds.height,
+            {
+                ...this.surfaceOptions(label),
+                collisionFilter: {
+                    category: CATEGORY.surface,
+                    mask: 0,
+                },
+            },
+        );
+        this.surfacesByBodyId.set(body.id, {
+            id: label,
+            role: "platform",
+            climbableEdges: [],
+        });
+        this.windowPlatformBody = body;
+        this.windowPlatformBounds = Object.freeze({ ...bounds });
+    }
+
+    private removeWindowPlatform(): void {
+        const platform = this.windowPlatformBody;
+        if (!platform) return;
+        const wasSupporting = this.supportedSurfaceBodyId === platform.id;
+        this.clearContactsForBody(platform.id);
+        this.surfacesByBodyId.delete(platform.id);
+        this.matter.world.remove(platform);
+        this.windowPlatformBody = undefined;
+        this.windowPlatformBounds = undefined;
+        if (wasSupporting && this.pet) {
+            const velocity = matterVelocityToPixelsPerSecond(this.pet.body.velocity);
+            this.beginAirborne(finiteVectorOrZero(velocity));
+        }
+    }
+
+    private updateWindowPlatformCollision(pet: Pet): void {
+        const platform = this.windowPlatformBody;
+        const platformBounds = this.windowPlatformBounds;
+        if (!platform || !platformBounds) return;
+        const enabled = shouldEnableOneWayPlatformCollision({
+            companionBounds: this.getBodyRectangle(pet.body),
+            platform: platformBounds,
+            verticalVelocity: matterVelocityToPixelsPerSecond(pet.body.velocity).y,
+            currentlySupported: this.supportedSurfaceBodyId === platform.id,
+        });
+        platform.collisionFilter.mask = enabled ? CATEGORY.companion : 0;
     }
 
     private createCompanion(): Pet {
@@ -329,6 +435,9 @@ export default class Pets extends Phaser.Scene {
 
     private applyContactPolicy(contacts: AggregatedContacts): void {
         if (this.surfaceJumpInProgress || this.releaseFromMissingSurface(contacts)) return;
+        if (this.state === "grounded" && contacts.down) {
+            this.supportedSurfaceBodyId = this.supportingSurfaceBodyId(contacts);
+        }
         const transitionContacts = this.withCrawlEntryContactSuppressed(contacts);
         const transitions = this.profile.behavior.supportedTransitions;
         const action = selectContactTransition(this.state, transitionContacts, {
@@ -347,7 +456,7 @@ export default class Pets extends Phaser.Scene {
                 this.beginAirborne({ x: 0, y: this.profile.behavior.movement.speed });
                 break;
             case "landing":
-                this.finishLanding();
+                this.finishLanding(contacts);
                 break;
             case "side":
                 this.handleSideContact(contacts);
@@ -376,11 +485,18 @@ export default class Pets extends Phaser.Scene {
         return true;
     }
 
+    private supportingSurfaceBodyId(contacts: AggregatedContacts): number | undefined {
+        return contacts.normalized.find((contact) => contact.directions.includes("down"))
+            ?.otherBodyId;
+    }
+
     private beforePhysicsStep(): void {
         const pet = this.pet;
         if (!pet) return;
         const body = pet.body;
         const speed = this.profile.behavior.movement.speed;
+
+        this.updateWindowPlatformCollision(pet);
 
         if (this.surfaceJumpInProgress) {
             pet.setIgnoreGravity(true);
@@ -472,10 +588,13 @@ export default class Pets extends Phaser.Scene {
         this.beginAirborne({ x: horizontal, y: this.profile.behavior.movement.speed });
     }
 
-    private finishLanding(): void {
+    private finishLanding(contacts?: AggregatedContacts): void {
         const pet = this.pet;
         if (!pet || this.state === "grounded") return;
         this.matter.body.setVelocity(pet.body, { x: 0, y: 0 });
+        this.supportedSurfaceBodyId = contacts
+            ? this.supportingSurfaceBodyId(contacts)
+            : undefined;
         this.setMechanicalState("grounded");
 
         const transitions = this.profile.behavior.supportedTransitions;
@@ -540,7 +659,11 @@ export default class Pets extends Phaser.Scene {
 
     private setMechanicalState(state: MechanicalState): void {
         this.state = state;
-        if (state !== "grounded") this.cancelActiveCursorAwareness();
+        if (state !== "grounded") {
+            this.supportedSurfaceBodyId = undefined;
+            this.cancelActiveCursorAwareness();
+            this.cancelActiveIconAwareness();
+        }
         if (state !== "climbing") this.climbSide = undefined;
         if (state !== "crawling") this.crawlEntrySide = undefined;
     }
@@ -695,6 +818,83 @@ export default class Pets extends Phaser.Scene {
         if (!this.cursorGreetingCompletion) return;
         pet.off(Phaser.Animations.Events.ANIMATION_COMPLETE, this.cursorGreetingCompletion);
         this.cursorGreetingCompletion = undefined;
+    }
+
+    private updateIconAwarenessBehavior(
+        pet: Pet,
+        snapshot: DesktopEnvironmentSnapshot | undefined,
+        cursorAwarenessOwnsBehavior: boolean,
+    ): boolean {
+        const result = updateIconAwareness(this.iconAwarenessState, {
+            nowMs: this.time.now,
+            available: snapshot !== undefined,
+            desktopShellActive: snapshot?.desktopShellActive ?? false,
+            groundedEligible:
+                this.state === "grounded" &&
+                ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number]),
+            higherPriorityOwned: cursorAwarenessOwnsBehavior,
+            icons: snapshot?.desktopItems ?? [],
+            companionBounds: this.getBodyRectangle(pet.body),
+            workArea: this.geometry.workArea,
+        });
+        this.iconAwarenessState = result.state;
+        if (result.requestDetailsFor) {
+            this.desktopEnvironmentManager.requestDetails(result.requestDetailsFor);
+        }
+        if (!(cursorAwarenessOwnsBehavior && result.intention.type === "disengage")) {
+            this.executeIconAwarenessIntention(pet, result.intention);
+        }
+        return ["notice", "approach", "inspect", "sit"].includes(result.state.phase);
+    }
+
+    private executeIconAwarenessIntention(
+        pet: Pet,
+        intention: IconAwarenessIntention,
+    ): void {
+        switch (intention.type) {
+            case "none":
+                break;
+            case "observe":
+            case "inspect":
+                this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
+                this.switchRole(pet, "stand");
+                this.faceIconDirection(pet, intention.direction);
+                break;
+            case "approach":
+                this.switchRole(pet, "walk");
+                this.updateDirection(
+                    pet,
+                    intention.direction === "left" ? Direction.LEFT : Direction.RIGHT,
+                );
+                break;
+            case "sit":
+                this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
+                this.switchRole(pet, "sit");
+                this.faceIconDirection(pet, intention.direction);
+                break;
+            case "disengage":
+                this.nextOrdinaryTransitionAt =
+                    this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
+                if (this.state === "grounded") {
+                    this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
+                    this.switchRole(pet, "stand");
+                }
+                break;
+        }
+    }
+
+    private faceIconDirection(pet: Pet, direction: "left" | "right"): void {
+        this.setPetLookToTheLeft(pet, direction === "left");
+        this.updateDirection(pet, Direction.UNKNOWN);
+    }
+
+    private cancelActiveIconAwareness(): void {
+        const result = cancelIconAwareness(this.iconAwarenessState, this.time.now);
+        this.iconAwarenessState = result.state;
+        if (result.intention.type === "disengage") {
+            this.nextOrdinaryTransitionAt =
+                this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
+        }
     }
 
     private updateClimbAndCrawlBehavior(pet: Pet): void {
@@ -907,6 +1107,15 @@ export default class Pets extends Phaser.Scene {
         return {
             x: (body.bounds.max.x - body.bounds.min.x) / 2,
             y: (body.bounds.max.y - body.bounds.min.y) / 2,
+        };
+    }
+
+    private getBodyRectangle(body: MatterJS.BodyType): Rectangle {
+        return {
+            x: body.bounds.min.x,
+            y: body.bounds.min.y,
+            width: body.bounds.max.x - body.bounds.min.x,
+            height: body.bounds.max.y - body.bounds.min.y,
         };
     }
 

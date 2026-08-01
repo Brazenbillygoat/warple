@@ -2,7 +2,7 @@
 
 mod app;
 
-use app::{cmd, lifecycle};
+use app::{cmd, desktop, lifecycle};
 use lifecycle::OverlayLifecycle;
 use log::{error, info};
 use tauri::Manager;
@@ -12,6 +12,7 @@ fn build_app() {
     let context = tauri::generate_context!();
     let builder = tauri::Builder::default()
         .manage(OverlayLifecycle::default())
+        .manage(desktop::DesktopObserver::default())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             lifecycle::show_or_resume(app);
         }))
@@ -37,6 +38,8 @@ fn build_app() {
         })
         .invoke_handler(tauri::generate_handler![
             cmd::get_mouse_position,
+            desktop::get_desktop_environment,
+            desktop::get_desktop_item_details,
             lifecycle::startup_ready,
             lifecycle::abort_startup,
         ]);
