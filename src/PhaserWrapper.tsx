@@ -3,6 +3,11 @@ import Phaser from "phaser";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { ValidatedCompanionProfile } from "./profiles/types";
 import type { OverlayGeometry } from "./runtime/geometry";
+import {
+    MATTER_FIXED_DELTA_MS,
+    MATTER_FIXED_HZ,
+    createMatterGravity,
+} from "./runtime/matterPolicy";
 import Pets from "./scenes/Pets";
 
 interface PhaserWrapperProps {
@@ -32,16 +37,26 @@ function PhaserWrapper({ profile, geometry, onReady, onAbort }: PhaserWrapperPro
                 height: geometry.monitor.height,
             },
             physics: {
-                default: "arcade",
-                arcade: {
+                default: "matter",
+                matter: {
                     debug: false,
-                    gravity: profile.behavior.gravity,
+                    gravity: createMatterGravity(profile.behavior.gravity),
+                    enableSleeping: false,
+                    autoUpdate: true,
+                    runner: {
+                        fps: MATTER_FIXED_HZ,
+                        delta: MATTER_FIXED_DELTA_MS,
+                        frameDeltaSmoothing: false,
+                        frameDeltaSnapping: false,
+                        maxUpdates: 4,
+                    },
                 },
             },
             fps: {
                 target: 30,
+                limit: 30,
                 min: 30,
-                smoothStep: true,
+                smoothStep: false,
             },
             scene: [Pets],
             audio: { noAudio: true },
