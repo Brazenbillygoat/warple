@@ -1,6 +1,15 @@
 import { error, info } from "@tauri-apps/plugin-log";
 import { ORDINARY_ROLES, type EngineRole, type ValidatedCompanionProfile } from "../profiles/types";
 import { selectWeightedOrdinaryRole } from "../profiles/weightedState";
+import {
+    cancelCursorAwareness,
+    completeCursorGreeting,
+    initialCursorAwarenessState,
+    updateCursorAwareness,
+    type CursorAwarenessIntention,
+    type CursorAwarenessState,
+    type HorizontalDirection,
+} from "../runtime/cursorAwareness";
 import type { OverlayGeometry, Rectangle } from "../runtime/geometry";
 import {
     aggregateCollisionContacts,
@@ -76,6 +85,8 @@ export default class Pets extends Phaser.Scene {
     private readonly surfacesByBodyId = new Map<number, SurfaceDefinition>();
     private frameElapsedMs = 0;
     private nextOrdinaryTransitionAt = 0;
+    private cursorAwarenessState: CursorAwarenessState = initialCursorAwarenessState();
+    private cursorGreetingCompletion: (() => void) | undefined;
     private startupFailed = false;
     private surfaceJumpInProgress = false;
     private surfaceJumpTween: Phaser.Tweens.Tween | undefined;
@@ -129,7 +140,8 @@ export default class Pets extends Phaser.Scene {
         this.frameElapsedMs = 0;
 
         this.inputManager.checkIsMouseOverPet();
-        this.updateOrdinaryBehavior(pet);
+        const cursorAwarenessOwnsBehavior = this.updateCursorAwarenessBehavior(pet);
+        if (!cursorAwarenessOwnsBehavior) this.updateOrdinaryBehavior(pet);
         this.updateClimbAndCrawlBehavior(pet);
     }
 
@@ -528,6 +540,7 @@ export default class Pets extends Phaser.Scene {
 
     private setMechanicalState(state: MechanicalState): void {
         this.state = state;
+        if (state !== "grounded") this.cancelActiveCursorAwareness();
         if (state !== "climbing") this.climbSide = undefined;
         if (state !== "crawling") this.crawlEntrySide = undefined;
     }
@@ -581,6 +594,107 @@ export default class Pets extends Phaser.Scene {
         window.setTimeout(() => {
             if (pet.active) pet.canRandomFlip = true;
         }, flip.cooldownMs);
+    }
+
+    private updateCursorAwarenessBehavior(pet: Pet): boolean {
+        const result = updateCursorAwareness(this.cursorAwarenessState, {
+            nowMs: this.time.now,
+            eligible:
+                this.state === "grounded" &&
+                ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number]),
+            cursor: this.inputManager.getLatestCursorSnapshot(),
+            companionCenter: { x: pet.body.position.x, y: pet.body.position.y },
+            companionBounds: {
+                min: { x: pet.body.bounds.min.x, y: pet.body.bounds.min.y },
+                max: { x: pet.body.bounds.max.x, y: pet.body.bounds.max.y },
+            },
+            workArea: this.geometry.workArea,
+        });
+        this.cursorAwarenessState = result.state;
+        this.executeCursorAwarenessIntention(pet, result.intention);
+        return (
+            result.state.phase === "notice" ||
+            result.state.phase === "approach" ||
+            result.state.phase === "greeting"
+        );
+    }
+
+    private executeCursorAwarenessIntention(
+        pet: Pet,
+        intention: CursorAwarenessIntention,
+    ): void {
+        switch (intention.type) {
+            case "none":
+                break;
+            case "observe":
+                this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
+                this.switchRole(pet, "stand");
+                this.faceCursorDirection(pet, intention.direction);
+                break;
+            case "approach":
+                this.switchRole(pet, "walk");
+                this.updateDirection(
+                    pet,
+                    intention.direction === "left" ? Direction.LEFT : Direction.RIGHT,
+                );
+                break;
+            case "greet":
+                this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
+                this.faceCursorDirection(pet, intention.direction);
+                this.switchRole(pet, "greet", { repeat: 0 });
+                this.clearCursorGreetingCompletion(pet);
+                this.cursorGreetingCompletion = () => {
+                    this.cursorGreetingCompletion = undefined;
+                    if (
+                        !pet.active ||
+                        this.state !== "grounded" ||
+                        this.cursorAwarenessState.phase !== "greeting"
+                    ) {
+                        return;
+                    }
+                    const completed = completeCursorGreeting(
+                        this.cursorAwarenessState,
+                        this.time.now,
+                    );
+                    this.cursorAwarenessState = completed.state;
+                    this.executeCursorAwarenessIntention(pet, completed.intention);
+                };
+                pet.once(
+                    Phaser.Animations.Events.ANIMATION_COMPLETE,
+                    this.cursorGreetingCompletion,
+                );
+                break;
+            case "disengage":
+                this.clearCursorGreetingCompletion(pet);
+                this.nextOrdinaryTransitionAt =
+                    this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
+                if (this.state === "grounded") {
+                    this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
+                    this.switchRole(pet, "stand");
+                }
+                break;
+        }
+    }
+
+    private faceCursorDirection(pet: Pet, direction: HorizontalDirection): void {
+        this.setPetLookToTheLeft(pet, direction === "left");
+        this.updateDirection(pet, Direction.UNKNOWN);
+    }
+
+    private cancelActiveCursorAwareness(): void {
+        const result = cancelCursorAwareness(this.cursorAwarenessState, this.time.now);
+        this.cursorAwarenessState = result.state;
+        if (result.intention.type === "disengage") {
+            if (this.pet) this.clearCursorGreetingCompletion(this.pet);
+            this.nextOrdinaryTransitionAt =
+                this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
+        }
+    }
+
+    private clearCursorGreetingCompletion(pet: Pet): void {
+        if (!this.cursorGreetingCompletion) return;
+        pet.off(Phaser.Animations.Events.ANIMATION_COMPLETE, this.cursorGreetingCompletion);
+        this.cursorGreetingCompletion = undefined;
     }
 
     private updateClimbAndCrawlBehavior(pet: Pet): void {
@@ -813,7 +927,14 @@ export default class Pets extends Phaser.Scene {
     ): void {
         try {
             const animationKey = this.configManager.getAnimationKeyForRole(role);
-            if (pet.role === role && pet.anims.getName() === animationKey && pet.anims.isPlaying) return;
+            if (
+                options.repeat === undefined &&
+                pet.role === role &&
+                pet.anims.getName() === animationKey &&
+                pet.anims.isPlaying
+            ) {
+                return;
+            }
             pet.role = role;
             pet.anims.play({
                 key: animationKey,

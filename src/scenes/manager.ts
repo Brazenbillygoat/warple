@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { error } from "@tauri-apps/plugin-log";
 import type { EngineRole, ValidatedCompanionProfile } from "../profiles/types";
+import type { Point } from "../runtime/cursorAwareness";
 import type { OverlayGeometry } from "../runtime/geometry";
 
 const appWindow = getCurrentWebviewWindow();
@@ -75,6 +76,8 @@ interface NativeMousePosition {
 export class InputManager {
     private input: Phaser.Input.InputPlugin | undefined;
     private isIgnoringCursorEvents = true;
+    private cursorRequestInFlight = false;
+    private latestCursorSnapshot: Point | undefined;
     private readonly ignoreCursorEventsDelayMs = 50;
 
     constructor(private readonly geometry: OverlayGeometry) {}
@@ -84,15 +87,31 @@ export class InputManager {
     }
 
     public checkIsMouseOverPet(): void {
+        if (this.cursorRequestInFlight) return;
+        this.cursorRequestInFlight = true;
         void invoke<NativeMousePosition | null>("get_mouse_position")
             .then((position) => {
-                if (position && this.detectMouseOverPet(position)) {
+                const localPosition = position ? this.toOverlayLocalPosition(position) : undefined;
+                this.latestCursorSnapshot = this.isInsideWorkArea(localPosition)
+                    ? localPosition
+                    : undefined;
+                if (localPosition && this.detectMouseOverPet(localPosition)) {
                     this.turnOffIgnoreCursorEvents();
                 } else {
                     this.turnOnIgnoreCursorEvents();
                 }
             })
-            .catch((reason) => error(`Failed to read cursor position: ${String(reason)}`));
+            .catch((reason) => {
+                this.latestCursorSnapshot = undefined;
+                error(`Failed to read cursor position: ${String(reason)}`);
+            })
+            .finally(() => {
+                this.cursorRequestInFlight = false;
+            });
+    }
+
+    public getLatestCursorSnapshot(): Point | undefined {
+        return this.latestCursorSnapshot;
     }
 
     public turnOffIgnoreCursorEvents(): void {
@@ -117,12 +136,28 @@ export class InputManager {
         }, this.ignoreCursorEventsDelayMs);
     }
 
-    private detectMouseOverPet(position: NativeMousePosition): boolean {
-        if (!this.input) return false;
+    private toOverlayLocalPosition(position: NativeMousePosition): Point | undefined {
         const localX = position.clientX / this.geometry.scaleFactor - this.geometry.monitor.x;
         const localY = position.clientY / this.geometry.scaleFactor - this.geometry.monitor.y;
-        this.input.mousePointer.x = localX;
-        this.input.mousePointer.y = localY;
+        if (!Number.isFinite(localX) || !Number.isFinite(localY)) return undefined;
+        return Object.freeze({ x: localX, y: localY });
+    }
+
+    private isInsideWorkArea(position: Point | undefined): position is Point {
+        if (!position) return false;
+        const bounds = this.geometry.workArea;
+        return (
+            position.x >= bounds.x &&
+            position.x <= bounds.x + bounds.width &&
+            position.y >= bounds.y &&
+            position.y <= bounds.y + bounds.height
+        );
+    }
+
+    private detectMouseOverPet(position: Point): boolean {
+        if (!this.input) return false;
+        this.input.mousePointer.x = position.x;
+        this.input.mousePointer.y = position.y;
         return this.input.hitTestPointer(this.input.activePointer).length > 0;
     }
 }
