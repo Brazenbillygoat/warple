@@ -1,5 +1,5 @@
 <div align="center">
-    <img width="180" src="./public/media/icon.png" alt="Warple">
+    <img width="180" src="./public/media/icon.png" alt="Warple ladybug mascot">
     <h1 align="center">Warple</h1>
     <p align="center">A little desktop companion that wanders, rests, climbs, and hangs out without trying to become your full-time job.</p>
     <img src="https://img.shields.io/badge/Windows-0078D6?style=flat&logo=windows&logoColor=white" alt="Windows">
@@ -43,10 +43,22 @@ Install dependencies with `npm ci`.
 Run the desktop application only when interactive review is intended:
 
 ```bash
-npm run tauri -- dev
+npm run devmode
 ```
 
 Use the tray menu's `Quit` action for a graceful shutdown.
+
+For live desktop IPC inspection, run `npm run devtools`. Select an icon on the
+desktop, return to the automatically opened DevTools Console, and inspect:
+
+```text
+warpleDesktopDiagnostics.latestActiveEnvironment
+warpleDesktopDiagnostics.latestDetails
+```
+
+The inspector exists only in the Vite development environment and retains the
+latest raw and validated exchanges in memory. It does not write icon values to
+application logs.
 
 ### Test and build
 

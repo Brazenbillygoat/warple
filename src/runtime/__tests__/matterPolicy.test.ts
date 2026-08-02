@@ -17,6 +17,7 @@ import {
     pixelsPerSecondToMatterVelocity,
     pixelsPerSecondVectorToMatterVelocity,
     selectContactTransition,
+    shouldEnableOneWayPlatformCollision,
     suppressContactDirection,
     type CollisionSample,
 } from "../matterPolicy";
@@ -669,5 +670,109 @@ describe("fixed-step Matter integration", () => {
         expect(activePairs).toEqual([]);
         expect(Number.isFinite(body.position.x)).toBe(true);
         expect(Number.isFinite(body.position.y)).toBe(true);
+    });
+
+    it("enables a one-way platform only while falling from above or already supported", () => {
+        const platform = { x: 100, y: 200, width: 300, height: 8 };
+        expect(
+            shouldEnableOneWayPlatformCollision({
+                companionBounds: { x: 200, y: 100, width: 80, height: 90 },
+                platform,
+                verticalVelocity: 54,
+                currentlySupported: false,
+            }),
+        ).toBe(true);
+        expect(
+            shouldEnableOneWayPlatformCollision({
+                companionBounds: { x: 200, y: 210, width: 80, height: 90 },
+                platform,
+                verticalVelocity: -54,
+                currentlySupported: false,
+            }),
+        ).toBe(false);
+        expect(
+            shouldEnableOneWayPlatformCollision({
+                companionBounds: { x: 50, y: 100, width: 40, height: 90 },
+                platform,
+                verticalVelocity: 54,
+                currentlySupported: false,
+            }),
+        ).toBe(false);
+        expect(
+            shouldEnableOneWayPlatformCollision({
+                companionBounds: { x: 200, y: 110, width: 80, height: 90 },
+                platform,
+                verticalVelocity: -1,
+                currentlySupported: true,
+            }),
+        ).toBe(true);
+    });
+
+    it("lands on a real one-way Matter platform from above and passes upward from below", () => {
+        const platformBounds = { x: 100, y: 200, width: 300, height: 8 };
+        const createPlatform = () =>
+            Matter.Bodies.rectangle(250, 204, 300, 8, {
+                isStatic: true,
+                collisionFilter: { category: 2, mask: 0, group: 0 },
+            });
+
+        const fallingEngine = createEngine(createMatterGravity({ x: 0, y: 200 }));
+        const falling = Matter.Bodies.rectangle(250, 100, 40, 40, {
+            frictionAir: 0,
+            collisionFilter: { category: 1, mask: 2, group: 0 },
+        });
+        const landingPlatform = createPlatform();
+        Matter.Composite.add(fallingEngine.world, [falling, landingPlatform]);
+        for (let index = 0; index < 180; index += 1) {
+            landingPlatform.collisionFilter.mask = shouldEnableOneWayPlatformCollision({
+                companionBounds: {
+                    x: falling.bounds.min.x,
+                    y: falling.bounds.min.y,
+                    width: falling.bounds.max.x - falling.bounds.min.x,
+                    height: falling.bounds.max.y - falling.bounds.min.y,
+                },
+                platform: platformBounds,
+                verticalVelocity: matterVelocityToPixelsPerSecond(falling.velocity).y,
+                currentlySupported: false,
+            })
+                ? 1
+                : 0;
+            Matter.Engine.update(fallingEngine, MATTER_FIXED_DELTA_MS);
+        }
+        expect(falling.bounds.max.y).toBeCloseTo(platformBounds.y, 0);
+
+        const risingEngine = createEngine(createMatterGravity({ x: 0, y: 0 }));
+        const rising = Matter.Bodies.rectangle(250, 240, 40, 40, {
+            frictionAir: 0,
+            collisionFilter: { category: 1, mask: 2, group: 0 },
+        });
+        const passThroughPlatform = createPlatform();
+        Matter.Composite.add(risingEngine.world, [rising, passThroughPlatform]);
+        Matter.Body.setVelocity(rising, pixelsPerSecondVectorToMatterVelocity({ x: 0, y: -600 }));
+        for (let index = 0; index < 20; index += 1) {
+            passThroughPlatform.collisionFilter.mask = shouldEnableOneWayPlatformCollision({
+                companionBounds: {
+                    x: rising.bounds.min.x,
+                    y: rising.bounds.min.y,
+                    width: rising.bounds.max.x - rising.bounds.min.x,
+                    height: rising.bounds.max.y - rising.bounds.min.y,
+                },
+                platform: platformBounds,
+                verticalVelocity: matterVelocityToPixelsPerSecond(rising.velocity).y,
+                currentlySupported: false,
+            })
+                ? 1
+                : 0;
+            Matter.Engine.update(risingEngine, MATTER_FIXED_DELTA_MS);
+        }
+        expect(rising.bounds.max.y).toBeLessThan(platformBounds.y);
+        expect(
+            risingEngine.pairs.list.some(
+                (pair) =>
+                    pair.isActive &&
+                    (pair.bodyA.id === passThroughPlatform.id ||
+                        pair.bodyB.id === passThroughPlatform.id),
+            ),
+        ).toBe(false);
     });
 });

@@ -66,6 +66,45 @@ export interface ContactTransitionOptions {
     readonly ceilingToCrawl: boolean;
 }
 
+export interface OneWayPlatformObservation {
+    readonly companionBounds: Rectangle;
+    readonly platform: Rectangle;
+    readonly verticalVelocity: number;
+    readonly currentlySupported: boolean;
+}
+
+export function shouldEnableOneWayPlatformCollision(
+    observation: OneWayPlatformObservation,
+): boolean {
+    const { companionBounds, platform, verticalVelocity, currentlySupported } = observation;
+    if (
+        !validPolicyRectangle(companionBounds) ||
+        !validPolicyRectangle(platform) ||
+        !Number.isFinite(verticalVelocity)
+    ) {
+        return false;
+    }
+    if (currentlySupported) return true;
+    const companionRight = companionBounds.x + companionBounds.width;
+    const platformRight = platform.x + platform.width;
+    const horizontalOverlap = companionBounds.x < platformRight && companionRight > platform.x;
+    const companionBottom = companionBounds.y + companionBounds.height;
+    const maximumStepDistance = Math.max(1, verticalVelocity / MATTER_FIXED_HZ + 2);
+    return (
+        horizontalOverlap &&
+        verticalVelocity >= 0 &&
+        companionBottom <= platform.y + maximumStepDistance
+    );
+}
+
+function validPolicyRectangle(value: Rectangle): boolean {
+    return (
+        [value.x, value.y, value.width, value.height].every(Number.isFinite) &&
+        value.width > 0 &&
+        value.height > 0
+    );
+}
+
 export function isFiniteVector(vector: Vector): boolean {
     return Number.isFinite(vector.x) && Number.isFinite(vector.y);
 }
