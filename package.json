@@ -9,6 +9,8 @@
   },
   "type": "module",
   "scripts": {
+    "assets:jo": "node scripts/export-jo-spritesheet.mjs",
+    "assets:jo:check": "node scripts/export-jo-spritesheet.mjs --check",
     "dev": "vite",
     "devmode": "tauri dev",
     "devtools": "tauri dev --features desktop-diagnostics",

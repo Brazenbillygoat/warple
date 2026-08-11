@@ -1,0 +1,82 @@
+import {
+    PROFILE_SCHEMA_VERSION,
+    type CompanionProfile,
+} from "./types";
+
+export const JO_PROFILE = {
+    schemaVersion: PROFILE_SCHEMA_VERSION,
+    id: "jo",
+    displayName: "Jo",
+    attribution: {
+        sourceUrl: "https://brazenbillygoat.github.io/mysite/",
+    },
+    artworkId: "jo-original",
+    frame: {
+        frameWidth: 128,
+        frameHeight: 128,
+        columns: 26,
+        rows: 9,
+    },
+    animations: {
+        stand: { row: 1, frames: 26 },
+        walk: { row: 2, frames: 12 },
+        sit: { row: 3, frames: 26 },
+        greet: { row: 4, frames: 16 },
+        jump: { row: 7, frames: 1 },
+        fall: { row: 8, frames: 9 },
+        drag: { row: 9, frames: 1 },
+        crawl: { row: 5, frames: 12 },
+        climb: { row: 6, frames: 12 },
+    },
+    roles: {
+        stand: "stand",
+        walk: "walk",
+        sit: "sit",
+        greet: "greet",
+        crawl: "crawl",
+        climb: "climb",
+        jump: "jump",
+        fall: "fall",
+        drag: "drag",
+    },
+    behavior: {
+        scale: 0.7,
+        animationFrameRate: 20,
+        gravity: { x: 0, y: 200 },
+        movement: { speed: 54, acceleration: 108 },
+        ordinaryTransitions: {
+            cooldownMs: 3000,
+            weights: { stand: 50, sit: 35, walk: 12, greet: 3 },
+        },
+        flip: {
+            enabled: true,
+            cooldownMs: 5000,
+            sampleMax: 2000,
+            triggerMin: 888,
+            triggerMax: 890,
+        },
+        dragging: {
+            enabled: true,
+            throwVelocityMultiplier: 9.9,
+            maxThrowSpeed: 1200,
+        },
+        climbing: {
+            enabled: true,
+            randomJumpSampleMax: 500,
+            randomJumpTrigger: 78,
+            jumpDurationMs: 3000,
+            pauseSampleMax: 500,
+            pauseTriggerMax: 5,
+            pauseMinMs: 3000,
+            pauseMaxMs: 6000,
+        },
+        supportedTransitions: {
+            initialDrop: true,
+            jumpToFall: true,
+            wallToClimb: true,
+            climbToCrawl: true,
+            crawlEdgeToJump: true,
+            dragToThrow: true,
+        },
+    },
+} as const satisfies CompanionProfile;

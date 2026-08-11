@@ -1,4 +1,5 @@
 import { BLOOKY_PROFILE } from "./blooky";
+import { JO_PROFILE } from "./jo";
 import { validateCompanionProfile } from "./validator";
 import type {
     BuiltInArtwork,
@@ -10,6 +11,7 @@ export const DEFAULT_PROFILE_ID = "blooky";
 
 export const BUILT_IN_PROFILES = Object.freeze({
     blooky: BLOOKY_PROFILE,
+    jo: JO_PROFILE,
 });
 
 export interface ResolvedProfiles {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BUILT_IN_ARTWORK } from "../artwork";
 import { BLOOKY_PROFILE } from "../blooky";
+import { JO_PROFILE } from "../jo";
 import {
     BUILT_IN_PROFILES,
     DEFAULT_PROFILE_ID,
@@ -73,14 +74,52 @@ describe("CompanionProfile validation", () => {
         expect(Object.isFrozen(profile.behavior)).toBe(true);
     });
 
-    it("ships exactly the current Blooky built-in catalog", () => {
-        expect(Object.keys(BUILT_IN_PROFILES)).toEqual(["blooky"]);
+    it("ships the stable Blooky and Jo built-in catalog", () => {
+        expect(Object.keys(BUILT_IN_PROFILES)).toEqual(["blooky", "jo"]);
         expect(selectDefaultProfile().id).toBe("blooky");
 
         const resolved = resolveBuiltInProfiles(undefined);
         expect(resolved.profile.id).toBe("blooky");
-        expect(resolved.catalog).toEqual([{ id: "blooky", displayName: "Blooky" }]);
+        expect(resolved.catalog).toEqual([
+            { id: "blooky", displayName: "Blooky" },
+            { id: "jo", displayName: "Jo" },
+        ]);
         expect(Object.isFrozen(resolved.catalog)).toBe(true);
+    });
+
+    it("validates Jo's original artwork, animation geometry, and inherited behavior", () => {
+        const profile = validateCompanionProfile(JO_PROFILE);
+
+        expect(profile.attribution.sourceUrl).toBe("https://brazenbillygoat.github.io/mysite/");
+        expect(profile.artwork).toEqual(BUILT_IN_ARTWORK["jo-original"]);
+        expect(profile.frame).toEqual({
+            frameWidth: 128,
+            frameHeight: 128,
+            columns: 26,
+            rows: 9,
+        });
+        expect(profile.animations).toEqual({
+            stand: { row: 1, frames: 26 },
+            walk: { row: 2, frames: 12 },
+            sit: { row: 3, frames: 26 },
+            greet: { row: 4, frames: 16 },
+            jump: { row: 7, frames: 1 },
+            fall: { row: 8, frames: 9 },
+            drag: { row: 9, frames: 1 },
+            crawl: { row: 5, frames: 12 },
+            climb: { row: 6, frames: 12 },
+        });
+        expect(profile.roles).toEqual(Object.fromEntries(ENGINE_ROLES.map((role) => [role, role])));
+        expect(profile.behavior).toMatchObject({
+            scale: BLOOKY_PROFILE.behavior.scale,
+            animationFrameRate: 20,
+            gravity: BLOOKY_PROFILE.behavior.gravity,
+            movement: BLOOKY_PROFILE.behavior.movement,
+            ordinaryTransitions: BLOOKY_PROFILE.behavior.ordinaryTransitions,
+            dragging: BLOOKY_PROFILE.behavior.dragging,
+            climbing: BLOOKY_PROFILE.behavior.climbing,
+            supportedTransitions: BLOOKY_PROFILE.behavior.supportedTransitions,
+        });
     });
 
     it("supports profile-specific animation names through engine-role mappings", () => {
@@ -147,6 +186,16 @@ describe("built-in profile resolution", () => {
         expect(resolved.profile.id).toBe("jo");
         expect(resolved.catalog[0].id).toBe("blooky");
         expect(resolved.catalog[1].id).toBe("jo");
+    });
+
+    it("selects the shipped Jo profile without a fixture registry", () => {
+        const resolved = resolveBuiltInProfiles("jo");
+
+        expect(resolved.profile.id).toBe("jo");
+        expect(resolved.catalog).toEqual([
+            { id: "blooky", displayName: "Blooky" },
+            { id: "jo", displayName: "Jo" },
+        ]);
     });
 
     it.each([
