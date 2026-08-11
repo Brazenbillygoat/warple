@@ -10,16 +10,16 @@
 
 ## What is Warple?
 
-Warple is a manually launched, tray-resident desktop companion built with Tauri, React, and Phaser. It loads one built-in, versioned, validated `CompanionProfile` and renders one companion inside the primary display's usable work area.
+Warple is a manually launched, tray-resident desktop companion built with Tauri, React, and Phaser. It loads one selected built-in, versioned, validated `CompanionProfile` and renders one companion inside the primary display's usable work area.
 
-The current placeholder companion is Blooky, adapted from the fully animated definition and artwork bundled by upstream WindowPet. Its [existing source page](https://undertaleshimejis.tumblr.com/post/140301252826/thank-you-for-6000-followers-here-i-present?is_related_post=1) remains credited. Blooky is not original Warple artwork or the project's permanent visual identity.
+The built-in catalog contains Blooky and Jo. Blooky is adapted from the fully animated definition and artwork bundled by upstream WindowPet, and its [existing source page](https://undertaleshimejis.tumblr.com/post/140301252826/thank-you-for-6000-followers-here-i-present?is_related_post=1) remains credited. Jo is an original character and original pixel art by Hyrum Butler; the character's attribution links to [Hyrum's site](https://brazenbillygoat.github.io/mysite/).
 
 Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by [SeakMengs](https://github.com/SeakMengs). WindowPet provided the original application and pet engine. That work remains credited while the current project's application-owned identity uses Warple.
 
 ## Current behavior
 
 - Starts only when the user launches it; no operating-system autostart
-- Runs one Blooky companion on the operating system's primary display
+- Runs one selected Blooky or Jo companion on the operating system's primary display
 - Keeps the companion inside the display's complete usable work area
 - Supports calm weighted states, walking, dragging and throwing, falling, climbing, and crawling
 - Uses a click-through transparent overlay that accepts input only over visible companion pixels
@@ -40,6 +40,8 @@ The profile boundary is data-only. Profiles cannot execute code, choose paths or
 - The platform prerequisites from the [Tauri 2 guide](https://v2.tauri.app/start/prerequisites/)
 
 Install dependencies with `npm ci`.
+
+Jo's checked-in runtime sprite sheet is generated deterministically from the authoritative Aseprite source files. Regenerate it with `npm run assets:jo`, or verify that the source manifest and checked-in PNG agree without writing with `npm run assets:jo:check`.
 
 Run the desktop application only when interactive review is intended:
 
@@ -113,6 +115,6 @@ Windows automated checks and installer builds have been verified locally. The re
 
 ## License
 
-Warple continues under the repository's MIT license. Original WindowPet code and retained artwork keep their existing attribution.
+Warple continues under the repository's MIT license. Original WindowPet code and retained artwork keep their existing attribution. Jo and the Jo pixel artwork are original work by Hyrum Butler.
 
 MIT License Copyright (c) 2023 Seakmeng

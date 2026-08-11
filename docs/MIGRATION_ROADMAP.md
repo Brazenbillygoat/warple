@@ -18,6 +18,12 @@ Warple now launches one built-in, validated, declarative Blooky profile through 
 
 The settings window, pet catalog, custom-pet editor, persisted configuration path, localization UI, 49 unused profiles and their sheets, settings-only dependencies, filesystem/dialog/opener plugins, settings capability, and custom-asset protocol were removed. Existing on-disk Warple and WindowPet data remains untouched, and diagnostic logging uses Tauri's standard log directory.
 
+## Completed: first original companion profile
+
+Jo is the second validated built-in profile and Warple's first original companion character. Seventeen authoritative 64-by-64 Aseprite sources, their hashes and timing metadata are retained in the repository. A dependency-free exporter excludes design-guide layers, scales pixels twofold with nearest-neighbor sampling, expands source timing at 20 frames per second, and deterministically produces the checked-in 128-pixel runtime sprite sheet.
+
+The existing profile selector can now switch between Blooky and Jo without changing the engine, native capabilities, dependency graph, or persistence format. Automated validation covers the source hashes, reproducible export, artwork geometry, animation rows, profile registration, startup selection, and readiness catalog. User-owned desktop review remains the final visual and behavioral gate.
+
 ## Completed: Warple application identity
 
 The project-owned package, crate, product, executable, bundle, Tauri identifier, configuration root, user-facing branding, and release artifact identity now use Warple. Tauri's identifier is `io.github.brazenbillygoat.warple`, and runtime configuration uses its standard identifier-derived `$APPCONFIG` directory.
@@ -28,7 +34,7 @@ No external users or retained custom data depended on the legacy identity, so th
 
 The former advisory, [`GHSA-qwww-vcr4-c8h2`](https://github.com/advisories/GHSA-qwww-vcr4-c8h2), affected unstable React Server Component APIs included in React Router. Warple uses React Router only for client-side navigation inside Tauri. It has no React server, server actions, or RSC configuration, so the vulnerable execution path was not used.
 
-The coordinated migration moved React and React DOM to 19.2.8 and replaced `react-router-dom` with React Router 8.3.0. The later tray-only profile foundation removed React Router, Mantine, Testing Library, Tabler Icons, and the rest of the former settings-only frontend stack. The application remains declarative and client-only, and `npm audit` reports no vulnerabilities.
+The coordinated migration moved React and React DOM to 19.2.8 and replaced `react-router-dom` with React Router 8.3.0. The later tray-only profile foundation removed React Router, Mantine, Testing Library, Tabler Icons, and the rest of the former settings-only frontend stack. The application remains declarative and client-only. A later audit now reports the existing development-only Vite to PostCSS to `nanoid@3.3.16` advisory; remediation belongs to a separate dependency slice.
 
 Manual desktop review remains required before the migration is merged.
 

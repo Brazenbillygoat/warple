@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { resolveBuiltInProfiles } from "../profiles/registry";
 import type { ResolvedProfiles } from "../profiles/registry";
-import { BLOOKY_PROFILE } from "../profiles/blooky";
-import { validateCompanionProfile } from "../profiles/validator";
 import { bootstrapOverlay, type OverlayMountContext } from "../startup";
 
 const search =
     "?generation=12&scaleFactor=1&monitorX=0&monitorY=0&monitorWidth=1920&monitorHeight=1080" +
     "&workAreaX=0&workAreaY=0&workAreaWidth=1920&workAreaHeight=1040";
 
-const expectedBlookyCatalog = [{ id: "blooky", displayName: "Blooky" }];
+const expectedBuiltInCatalog = [
+    { id: "blooky", displayName: "Blooky" },
+    { id: "jo", displayName: "Jo" },
+];
 
 function realResolver(): (requested: string | undefined) => ResolvedProfiles {
     return (requested) => resolveBuiltInProfiles(requested);
@@ -33,7 +34,7 @@ describe("overlay startup", () => {
         expect(invokeCommand).toHaveBeenCalledTimes(1);
         expect(invokeCommand).toHaveBeenCalledWith("startup_ready", {
             generation: 12,
-            profiles: expectedBlookyCatalog,
+            profiles: expectedBuiltInCatalog,
             activeProfileId: "blooky",
         });
     });
@@ -57,7 +58,7 @@ describe("overlay startup", () => {
         mounted?.signalReady();
         expect(invokeCommand).toHaveBeenCalledWith("startup_ready", {
             generation: 12,
-            profiles: expectedBlookyCatalog,
+            profiles: expectedBuiltInCatalog,
             activeProfileId: "blooky",
         });
     });
@@ -93,7 +94,7 @@ describe("overlay startup", () => {
         mounted?.signalReady();
         expect(invokeCommand).toHaveBeenCalledWith("startup_ready", {
             generation: 12,
-            profiles: expectedBlookyCatalog,
+            profiles: expectedBuiltInCatalog,
             activeProfileId: "blooky",
         });
     });
@@ -132,23 +133,13 @@ describe("overlay startup", () => {
         expect(invokeCommand).toHaveBeenCalledWith("abort_startup", { generation: 12 });
     });
 
-    it("sends an alternate profile through injected test dependencies without touching production", () => {
+    it("mounts the shipped Jo profile and sends its validated catalog identity", () => {
         const invokeCommand = vi.fn().mockResolvedValue(undefined);
-        const alternate = validateCompanionProfile({
-            ...structuredClone(BLOOKY_PROFILE),
-            id: "jo",
-            displayName: "Jo",
-        });
-        const catalog = [
-            { id: "blooky", displayName: "Blooky" },
-            { id: "jo", displayName: "Jo" },
-        ];
-
         let mounted: OverlayMountContext | undefined;
         bootstrapOverlay({
             search: `${search}&profileId=jo`,
             mount: (context) => (mounted = context),
-            resolveProfiles: () => ({ profile: alternate, catalog }),
+            resolveProfiles: realResolver(),
             invokeCommand,
         });
 
@@ -156,7 +147,7 @@ describe("overlay startup", () => {
         mounted?.signalReady();
         expect(invokeCommand).toHaveBeenCalledWith("startup_ready", {
             generation: 12,
-            profiles: catalog,
+            profiles: expectedBuiltInCatalog,
             activeProfileId: "jo",
         });
     });

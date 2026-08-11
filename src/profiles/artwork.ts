@@ -7,4 +7,10 @@ export const BUILT_IN_ARTWORK = Object.freeze({
         width: 1024,
         height: 1152,
     }),
+    "jo-original": Object.freeze({
+        id: "jo-original",
+        src: "/media/companions/jo/spritesheet.png",
+        width: 3328,
+        height: 1152,
+    }),
 }) satisfies Readonly<Record<string, BuiltInArtwork>>;

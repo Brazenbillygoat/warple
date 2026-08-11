@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "character": {
+    "id": "jo",
+    "displayName": "Jo",
+    "creator": "Hyrum Butler",
+    "sourceUrl": "https://brazenbillygoat.github.io/mysite/"
+  },
+  "source": {
+    "directory": "art/companions/jo/source",
+    "width": 64,
+    "height": 64,
+    "colorDepth": 32,
+    "ignoredLayer": "Guides"
+  },
+  "runtime": {
+    "output": "public/media/companions/jo/spritesheet.png",
+    "cellWidth": 128,
+    "cellHeight": 128,
+    "scale": 2,
+    "frameRate": 20,
+    "columns": 26,
+    "rows": 9,
+    "sha256": "A40194698664BB87C4085BB19A0E1FA0716ABCF44E0CD11951F9DDC52CEDAC5D"
+  },
+  "sources": [
+    {
+      "file": "jo-idle-4frame.ase",
+      "sha256": "D26BDB170648C2AB75416D0D74D57569DF32ED3C51CE13FE5EB3AD7D28ABC306",
+      "frames": 4,
+      "durationsMs": [450, 140, 450, 140]
+    },
+    {
+      "file": "jo-standing-canonical.ase",
+      "sha256": "08B3D57070DD5C20F163E8D0E51C14F69600CB9578874835B1B01F90C750BC49",
+      "frames": 1,
+      "durationsMs": [100]
+    },
+    {
+      "file": "jo-fall-canonical.ase",
+      "sha256": "B36A3F30F818FB017FC587D491170F1142471112E6C68F1996672E106153C582",
+      "frames": 1,
+      "durationsMs": [450]
+    },
+    {
+      "file": "jo-jump-canonical.ase",
+      "sha256": "879B5B9C50C0C5C3B0F97D9ED419ABBEC7CB1D6B18CC858A0B8275C40CB716E0",
+      "frames": 1,
+      "durationsMs": [450]
+    },
+    {
+      "file": "jo-ceiling-crawl-6frame.ase",
+      "sha256": "BD04265CDE266B52E9A44D10020F6634B77BB14EE0442C010C23CBB4262EA8B9",
+      "frames": 6,
+      "durationsMs": [120, 120, 120, 120, 120, 120]
+    },
+    {
+      "file": "jo-wall-climb-6frame.ase",
+      "sha256": "B42AF1F44B3FE863F4DE9AE3A7033F5177F7C0A1E0EDDAC246FDDC174E938C54",
+      "frames": 6,
+      "durationsMs": [120, 120, 120, 120, 120, 120]
+    },
+    {
+      "file": "jo-ceiling-hang-canonical.ase",
+      "sha256": "7179E801484F03C14E2A143BC638E964999C42F6F9792ADAE23BD8435D2C49BF",
+      "frames": 1,
+      "durationsMs": [450]
+    },
+    {
+      "file": "jo-wall-contact-canonical.ase",
+      "sha256": "0B8D183B5A53D76AB6B0196B49611EC7328D6AD4D5F1D507175D51FD54E9A2A8",
+      "frames": 1,
+      "durationsMs": [450]
+    },
+    {
+      "file": "jo-greet-play-4frame.ase",
+      "sha256": "A307CF8D044AE15C0BBC51A535063B83165586C729DCF907CA41C47FC8F11D13",
+      "frames": 4,
+      "durationsMs": [220, 120, 180, 280]
+    },
+    {
+      "file": "jo-drag-held-canonical.ase",
+      "sha256": "540E1C493F41CB0C0D37C5ECB424037F299737A5CF4031C2024E78A6CD5EEB31",
+      "frames": 1,
+      "durationsMs": [450]
+    },
+    {
+      "file": "jo-stand-up-4frame.ase",
+      "sha256": "42644F344FEC87AC94BBF670F97EC9943BFFCD9A243EC0252B43E82655FE5E28",
+      "frames": 4,
+      "durationsMs": [220, 150, 130, 220]
+    },
+    {
+      "file": "jo-sit-down-4frame.ase",
+      "sha256": "56725EEA08436EFC6B55325E110063FA1A5675EE3D00455F469FEB26AFEB1C16",
+      "frames": 4,
+      "durationsMs": [160, 130, 150, 260]
+    },
+    {
+      "file": "jo-sit-idle-2frame.ase",
+      "sha256": "D19EBC20EDC5E67B3254C5DBBA2C26FFC7A39FB919ABBD438B7A480C91E83749",
+      "frames": 2,
+      "durationsMs": [650, 650]
+    },
+    {
+      "file": "jo-walk-6frame.ase",
+      "sha256": "272EF411528BF0B739B6AFBF9081372FB88E9021C9DF44E237A27B97ED71600B",
+      "frames": 6,
+      "durationsMs": [120, 100, 120, 120, 100, 120]
+    },
+    {
+      "file": "jo-side-idle-4frame.ase",
+      "sha256": "1B567AF0B160348458AEB8F245468F9A1F83B18B450E4A0FEF3E2CC92CCCB5CA",
+      "frames": 4,
+      "durationsMs": [480, 140, 480, 140]
+    },
+    {
+      "file": "jo-side-standing-canonical.ase",
+      "sha256": "51F6CA84330AF5BEB1C4DE35C915AFA6ED5D36324E7C6B3AFCC5385B8338E2DB",
+      "frames": 1,
+      "durationsMs": [450]
+    },
+    {
+      "file": "jo-mj-spin-6frame.ase",
+      "sha256": "49283E8BB5581D29CFC6E685BDF2BFF55C64ADF075AC2091B0DACCFADE84C78A",
+      "frames": 6,
+      "durationsMs": [110, 90, 100, 110, 90, 100]
+    }
+  ],
+  "roles": [
+    {
+      "role": "stand",
+      "source": "jo-side-idle-4frame.ase",
+      "row": 1,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 26
+    },
+    {
+      "role": "walk",
+      "source": "jo-walk-6frame.ase",
+      "row": 2,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 12
+    },
+    {
+      "role": "sit",
+      "source": "jo-sit-idle-2frame.ase",
+      "row": 3,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 26
+    },
+    {
+      "role": "greet",
+      "source": "jo-greet-play-4frame.ase",
+      "row": 4,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 16
+    },
+    {
+      "role": "crawl",
+      "source": "jo-ceiling-crawl-6frame.ase",
+      "row": 5,
+      "alignment": "ceiling",
+      "expandTiming": true,
+      "runtimeFrames": 12
+    },
+    {
+      "role": "climb",
+      "source": "jo-wall-climb-6frame.ase",
+      "row": 6,
+      "alignment": "right-wall",
+      "expandTiming": true,
+      "runtimeFrames": 12
+    },
+    {
+      "role": "jump",
+      "source": "jo-jump-canonical.ase",
+      "row": 7,
+      "alignment": "center",
+      "expandTiming": false,
+      "runtimeFrames": 1
+    },
+    {
+      "role": "fall",
+      "source": "jo-fall-canonical.ase",
+      "row": 8,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 9
+    },
+    {
+      "role": "drag",
+      "source": "jo-drag-held-canonical.ase",
+      "row": 9,
+      "alignment": "center",
+      "expandTiming": false,
+      "runtimeFrames": 1
+    }
+  ]
+}
