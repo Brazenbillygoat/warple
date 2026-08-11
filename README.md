@@ -23,11 +23,12 @@ Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by
 - Keeps the companion inside the display's complete usable work area
 - Supports calm weighted states, walking, dragging and throwing, falling, climbing, and crawling
 - Uses a click-through transparent overlay that accepts input only over visible companion pixels
-- Exposes only `Show/Resume`, `Pause`, `Restart`, and `Quit` through the tray
+- Exposes `Show/Resume`, `Pause`, `Restart`, `Character`, and `Quit` through the tray
+- The `Character` submenu lists built-in profiles with a checkmark on the active one; selecting a different profile while running replaces the overlay without restarting the tray, and selecting while paused applies on the next resume
 - Keeps the tray alive while paused and treats a second launch as `Show/Resume`
-- Loads no settings files, custom pets, downloaded profiles, or general configuration UI
+- Persists only the selected built-in profile ID; loads no settings files, custom pets, downloaded profiles, or general configuration UI
 
-The profile boundary is data-only. Profiles cannot execute code, choose paths or URLs for artwork, access files, open links, or request permissions. A future profile selector can build on this boundary, but downloads and selection UI are not implemented.
+The profile boundary is data-only. Profiles cannot execute code, choose paths or URLs for artwork, access files, open links, or request permissions. The `Character` selector lists only built-in profiles; profile downloads, imports, and external profile storage remain unavailable.
 
 ## Development
 
@@ -78,23 +79,24 @@ The last command builds the desktop application and installers without launching
 
 ```text
 Native primary-display geometry
-        -> hidden Tauri overlay
-        -> synchronous built-in profile validation
+        -> hidden Tauri overlay (with optional persisted profileId)
+        -> synchronous built-in profile resolution and catalog
         -> React mounts Phaser
         -> one companion scene
-        -> one-shot startup_ready handshake
-        -> lifecycle tray and visible overlay
+        -> one-shot startup_ready handshake (generation, profiles, activeProfileId)
+        -> lifecycle tray with Character submenu and visible overlay
 ```
 
-- `src/profiles/` defines, validates, and selects the single built-in declarative profile.
+- `src/profiles/` defines, validates, resolves the requested built-in profile, and exports an immutable catalog projection.
+- `src/startup.ts` reads the optional `profileId` from the startup URL, resolves the active profile and catalog, and sends them through the one-shot readiness handshake.
 - `src/PhaserWrapper.tsx` passes the immutable profile and normalized geometry into Phaser.
 - `src/scenes/Pets.ts` owns the companion's animation, input, movement, and physics.
-- Tauri owns primary-display resolution, the serialized overlay lifecycle, the readiness handshake, the tray, and graceful exit behavior.
+- Tauri owns primary-display resolution, the serialized overlay lifecycle, the readiness handshake, the tray (including the `Character` submenu), single-profile-ID persistence, deferred overlay replacement, and graceful exit behavior.
 - Rust exposes only startup signaling and native cursor position to the overlay.
 
 ## Local data and safety
 
-Warple does not read, create, migrate, or delete application configuration data. Existing Warple and legacy WindowPet configuration directories remain untouched. Native diagnostic logs use Tauri's standard log directory.
+Warple persists one narrow native record: the selected built-in profile ID, stored as `selected-profile-id` under Tauri's application config directory. It does not read, create, migrate, or delete any other application configuration data. Existing Warple and legacy WindowPet configuration directories remain untouched. Native diagnostic logs use Tauri's standard log directory.
 
 The overlay has no shell, filesystem, dialog, opener, screen-capture, network, process, or UI-control permission. Screen awareness or interaction would require a separate permission design and explicit review.
 

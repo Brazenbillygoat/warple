@@ -100,3 +100,8 @@ export interface BuiltInArtwork {
 export interface ValidatedCompanionProfile extends CompanionProfile {
     readonly artwork: BuiltInArtwork;
 }
+
+export interface ProfileCatalogEntry {
+    readonly id: string;
+    readonly displayName: string;
+}

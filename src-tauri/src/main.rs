@@ -2,7 +2,7 @@
 
 mod app;
 
-use app::{cmd, desktop, lifecycle};
+use app::{cmd, desktop, lifecycle, profile_selection::ProfileSelection};
 use lifecycle::OverlayLifecycle;
 use log::{error, info};
 use tauri::Manager;
@@ -12,6 +12,7 @@ fn build_app() {
     let context = tauri::generate_context!();
     let builder = tauri::Builder::default()
         .manage(OverlayLifecycle::default())
+        .manage(ProfileSelection::default())
         .manage(desktop::DesktopObserver::default())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             lifecycle::show_or_resume(app);
@@ -27,6 +28,8 @@ fn build_app() {
                 .build(),
         )
         .setup(|app| {
+            let config_dir = app.path().app_config_dir().ok();
+            app.state::<ProfileSelection>().init(config_dir);
             if let Err(reason) = lifecycle::create_initial_overlay(app.handle()) {
                 error!("{reason}");
                 app.state::<OverlayLifecycle>().mark_explicit_exit();

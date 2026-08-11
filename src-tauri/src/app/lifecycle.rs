@@ -6,6 +6,7 @@ use tauri::{
     WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
+use super::profile_selection::{ProfileCatalogEntry, ProfileSelection};
 use super::tray;
 
 const OVERLAY_LABEL: &str = "main";
@@ -65,8 +66,8 @@ impl DisplayGeometry {
         })
     }
 
-    fn startup_url(self, generation: u64) -> String {
-        format!(
+    fn startup_url(self, generation: u64, profile_id: Option<&str>) -> String {
+        let mut url = format!(
             "/?generation={generation}&scaleFactor={}&monitorX={}&monitorY={}&monitorWidth={}&monitorHeight={}&workAreaX={}&workAreaY={}&workAreaWidth={}&workAreaHeight={}",
             self.scale_factor,
             self.monitor.x,
@@ -77,7 +78,12 @@ impl DisplayGeometry {
             self.work_area.y,
             self.work_area.width,
             self.work_area.height,
-        )
+        );
+        if let Some(id) = profile_id {
+            url.push_str("&profileId=");
+            url.push_str(id);
+        }
+        url
     }
 }
 
@@ -125,8 +131,10 @@ struct PendingOverlay {
 struct LifecycleState {
     next_generation: u64,
     pending: Option<PendingOverlay>,
+    overlay_visible: bool,
     tray_created: bool,
     explicit_exit: bool,
+    relaunch_intent: bool,
 }
 
 impl LifecycleState {
@@ -160,6 +168,7 @@ impl LifecycleState {
             .is_some_and(|pending| pending.generation == generation)
         {
             self.pending = None;
+            self.overlay_visible = true;
             self.tray_created |= tray_created;
         }
     }
@@ -170,6 +179,7 @@ impl LifecycleState {
             .is_some_and(|pending| pending.generation == generation)
         {
             self.pending = None;
+            self.overlay_visible = false;
             self.explicit_exit = true;
             true
         } else {
@@ -184,6 +194,26 @@ impl LifecycleState {
         {
             self.pending = None;
         }
+        self.overlay_visible = false;
+    }
+
+    fn set_relaunch_intent(&mut self) -> bool {
+        if self.overlay_visible || self.pending.is_some() {
+            self.relaunch_intent = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn clear_relaunch_intent(&mut self) {
+        self.relaunch_intent = false;
+    }
+
+    fn consume_relaunch_intent(&mut self) -> bool {
+        let intent = self.relaunch_intent;
+        self.relaunch_intent = false;
+        intent
     }
 }
 
@@ -242,7 +272,8 @@ fn create_overlay(app: &AppHandle, launch_kind: LaunchKind) -> Result<bool, Stri
         }
     })?;
     let generation = state.begin_overlay();
-    let url = geometry.startup_url(generation);
+    let profile_id = app.state::<ProfileSelection>().startup_candidate();
+    let url = geometry.startup_url(generation, profile_id.as_deref());
 
     let window = match WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App(url.into()))
         .title("Warple")
@@ -282,10 +313,19 @@ fn create_overlay(app: &AppHandle, launch_kind: LaunchKind) -> Result<bool, Stri
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
             let lifecycle = app_handle.state::<OverlayLifecycle>();
-            match lifecycle.lock() {
-                Ok(mut state) => state.overlay_closed(generation),
-                Err(reason) => error!("{reason}"),
+            let should_relaunch = match lifecycle.lock() {
+                Ok(mut state) => {
+                    state.overlay_closed(generation);
+                    state.consume_relaunch_intent()
+                }
+                Err(reason) => {
+                    error!("{reason}");
+                    false
+                }
             };
+            if should_relaunch {
+                show_or_resume(&app_handle);
+            }
         }
     });
     Ok(true)
@@ -305,10 +345,41 @@ pub fn show_or_resume(app: &AppHandle) {
 
 pub fn pause(app: &AppHandle) {
     let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
+        if let Ok(mut state) = app.state::<OverlayLifecycle>().lock() {
+            state.clear_relaunch_intent();
+        }
+        return;
+    };
+    if let Ok(mut state) = app.state::<OverlayLifecycle>().lock() {
+        state.clear_relaunch_intent();
+    }
+    if let Err(reason) = window.close() {
+        error!("Failed to pause companion overlay: {reason}");
+    }
+}
+
+pub fn request_relaunch(app: &AppHandle) {
+    let should_close = match app.state::<OverlayLifecycle>().lock() {
+        Ok(mut state) => state.set_relaunch_intent(),
+        Err(reason) => {
+            error!("{reason}");
+            return;
+        }
+    };
+    if !should_close {
+        return;
+    }
+    let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
+        if let Ok(mut state) = app.state::<OverlayLifecycle>().lock() {
+            state.clear_relaunch_intent();
+        }
         return;
     };
     if let Err(reason) = window.close() {
-        error!("Failed to pause companion overlay: {reason}");
+        error!("Failed to close companion overlay for replacement: {reason}");
+        if let Ok(mut state) = app.state::<OverlayLifecycle>().lock() {
+            state.clear_relaunch_intent();
+        }
     }
 }
 
@@ -322,12 +393,15 @@ fn fail_claimed_startup(app: &AppHandle, generation: u64, reason: &str) {
     app.exit(1);
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn startup_ready(
     app: AppHandle,
     window: WebviewWindow,
     lifecycle: State<'_, OverlayLifecycle>,
+    selection: State<'_, ProfileSelection>,
     generation: u64,
+    profiles: Vec<ProfileCatalogEntry>,
+    active_profile_id: String,
 ) -> Result<(), String> {
     if window.label() != OVERLAY_LABEL {
         return Err("startup readiness is restricted to the companion overlay".into());
@@ -338,12 +412,27 @@ pub fn startup_ready(
         return Ok(());
     }
 
+    let tray_selection = match selection.accept_ready_catalog(&profiles, &active_profile_id) {
+        Ok(Some(tray_selection)) => tray_selection,
+        Ok(None) => {
+            request_relaunch(&app);
+            return Ok(());
+        }
+        Err(reason) => {
+            fail_claimed_startup(&app, generation, "Companion startup catalog is invalid");
+            return Err(reason);
+        }
+    };
+
     let created_tray = action == ReadinessAction::CreateTrayAndShow;
     if created_tray {
-        if let Err(reason) = tray::init_system_tray(&app) {
+        if let Err(reason) = tray::init_system_tray(&app, &tray_selection) {
             fail_claimed_startup(&app, generation, "Failed to create lifecycle tray");
             return Err(reason.to_string());
         }
+    } else if let Err(reason) = tray::refresh_tray_menu(&app, &tray_selection) {
+        fail_claimed_startup(&app, generation, "Failed to refresh character tray menu");
+        return Err(reason.to_string());
     }
     if let Err(reason) = window.show() {
         fail_claimed_startup(&app, generation, "Failed to show ready companion overlay");
@@ -407,10 +496,14 @@ mod tests {
                 },
             }
         );
-        let url = geometry.startup_url(9);
+        let url = geometry.startup_url(9, None);
         assert!(url.contains("generation=9"));
         assert!(url.contains("workAreaX=40"));
         assert!(url.contains("workAreaHeight=656"));
+        assert!(!url.contains("profileId"));
+
+        let url_with_profile = geometry.startup_url(9, Some("blooky"));
+        assert!(url_with_profile.contains("profileId=blooky"));
     }
 
     #[test]
@@ -450,5 +543,83 @@ mod tests {
         assert!(lifecycle.should_prevent_exit());
         lifecycle.mark_explicit_exit();
         assert!(!lifecycle.should_prevent_exit());
+    }
+
+    #[test]
+    fn relaunch_intent_is_set_while_overlay_is_visible() {
+        let mut state = LifecycleState::default();
+
+        assert!(!state.set_relaunch_intent());
+
+        let generation = state.begin_overlay();
+        state.claim_readiness(generation);
+        state.finish_readiness(generation, true);
+
+        assert!(state.overlay_visible);
+        assert!(state.set_relaunch_intent());
+        assert!(state.relaunch_intent);
+    }
+
+    #[test]
+    fn relaunch_intent_is_set_while_overlay_is_awaiting_readiness() {
+        let mut state = LifecycleState::default();
+        state.begin_overlay();
+
+        assert!(!state.overlay_visible);
+        assert!(state.pending.is_some());
+        assert!(state.set_relaunch_intent());
+        assert!(state.relaunch_intent);
+    }
+
+    #[test]
+    fn relaunch_intent_is_consumed_once_on_overlay_close() {
+        let mut state = LifecycleState::default();
+        let generation = state.begin_overlay();
+        state.claim_readiness(generation);
+        state.finish_readiness(generation, true);
+        state.set_relaunch_intent();
+
+        state.overlay_closed(generation);
+        assert!(state.consume_relaunch_intent());
+        assert!(!state.consume_relaunch_intent());
+    }
+
+    #[test]
+    fn relaunch_intent_is_cleared_on_pause() {
+        let mut state = LifecycleState::default();
+        let generation = state.begin_overlay();
+        state.claim_readiness(generation);
+        state.finish_readiness(generation, true);
+        state.set_relaunch_intent();
+
+        state.clear_relaunch_intent();
+        assert!(!state.relaunch_intent);
+    }
+
+    #[test]
+    fn paused_selection_does_not_request_relaunch() {
+        let mut state = LifecycleState::default();
+        let generation = state.begin_overlay();
+        state.claim_readiness(generation);
+        state.finish_readiness(generation, true);
+        state.overlay_closed(generation);
+
+        assert!(!state.overlay_visible);
+        assert!(!state.set_relaunch_intent());
+    }
+
+    #[test]
+    fn repeated_relaunch_requests_converge_on_one_intent() {
+        let mut state = LifecycleState::default();
+        let generation = state.begin_overlay();
+        state.claim_readiness(generation);
+        state.finish_readiness(generation, true);
+
+        assert!(state.set_relaunch_intent());
+        assert!(state.set_relaunch_intent());
+
+        state.overlay_closed(generation);
+        assert!(state.consume_relaunch_intent());
+        assert!(!state.consume_relaunch_intent());
     }
 }
