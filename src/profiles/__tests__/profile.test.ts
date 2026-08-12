@@ -8,7 +8,6 @@ import {
     resolveBuiltInProfiles,
     selectDefaultProfile,
 } from "../registry";
-import { ENGINE_ROLES } from "../types";
 import { validateCompanionProfile } from "../validator";
 
 function copyProfile(): Record<string, any> {
@@ -41,7 +40,18 @@ describe("CompanionProfile validation", () => {
             "crawl",
             "climb",
         ]);
-        expect(profile.roles).toEqual(Object.fromEntries(ENGINE_ROLES.map((role) => [role, role])));
+        expect(profile.roles).toEqual({
+            stand: "stand",
+            walk: "walk",
+            sit: "sit",
+            greet: "greet",
+            crawl: "crawl",
+            climb: "climb",
+            jump: "jump",
+            fall: "fall",
+            drag: "drag",
+            special: "greet",
+        });
         expect(profile.attribution.sourceUrl).toBe(BLOOKY_PROFILE.attribution.sourceUrl);
         expect(profile.artwork).toEqual(BUILT_IN_ARTWORK["blooky-shimeji"]);
         expect(profile.behavior).toMatchObject({
@@ -51,7 +61,7 @@ describe("CompanionProfile validation", () => {
             movement: { speed: 54, acceleration: 108 },
             ordinaryTransitions: {
                 cooldownMs: 3000,
-                weights: { stand: 50, sit: 35, walk: 12, greet: 3 },
+                weights: { stand: 50, sit: 35, walk: 12, greet: 3, special: 0 },
             },
             flip: { enabled: true, cooldownMs: 5000 },
             dragging: {
@@ -96,7 +106,7 @@ describe("CompanionProfile validation", () => {
             frameWidth: 128,
             frameHeight: 128,
             columns: 26,
-            rows: 9,
+            rows: 10,
         });
         expect(profile.animations).toEqual({
             stand: { row: 1, frames: 26 },
@@ -108,17 +118,38 @@ describe("CompanionProfile validation", () => {
             drag: { row: 9, frames: 1 },
             crawl: { row: 5, frames: 12 },
             climb: { row: 6, frames: 12 },
+            "mj-spin": { row: 10, frames: 12 },
         });
-        expect(profile.roles).toEqual(Object.fromEntries(ENGINE_ROLES.map((role) => [role, role])));
+        expect(profile.roles).toEqual({
+            stand: "stand",
+            walk: "walk",
+            sit: "sit",
+            greet: "greet",
+            crawl: "crawl",
+            climb: "climb",
+            jump: "jump",
+            fall: "fall",
+            drag: "drag",
+            special: "mj-spin",
+        });
         expect(profile.behavior).toMatchObject({
             scale: BLOOKY_PROFILE.behavior.scale,
             animationFrameRate: 20,
             gravity: BLOOKY_PROFILE.behavior.gravity,
             movement: BLOOKY_PROFILE.behavior.movement,
-            ordinaryTransitions: BLOOKY_PROFILE.behavior.ordinaryTransitions,
+            ordinaryTransitions: {
+                cooldownMs: BLOOKY_PROFILE.behavior.ordinaryTransitions.cooldownMs,
+            },
             dragging: BLOOKY_PROFILE.behavior.dragging,
             climbing: BLOOKY_PROFILE.behavior.climbing,
             supportedTransitions: BLOOKY_PROFILE.behavior.supportedTransitions,
+        });
+        expect(profile.behavior.ordinaryTransitions.weights).toEqual({
+            stand: 50,
+            sit: 35,
+            walk: 12,
+            greet: 3,
+            special: 2,
         });
     });
 
@@ -132,7 +163,7 @@ describe("CompanionProfile validation", () => {
     });
 
     it.each([
-        ["unsupported schema", (profile: any) => (profile.schemaVersion = 2)],
+        ["unsupported schema", (profile: any) => (profile.schemaVersion = 3)],
         ["invalid identifier", (profile: any) => (profile.id = "Blooky Profile")],
         ["unknown field", (profile: any) => (profile.executable = "nope")],
         ["unknown artwork", (profile: any) => (profile.artworkId = "not-registered")],
@@ -156,6 +187,7 @@ describe("CompanionProfile validation", () => {
                     sit: 0,
                     walk: 0,
                     greet: 0,
+                    special: 0,
                 }),
         ],
         ["physics-only ordinary role", (profile: any) => (profile.behavior.ordinaryTransitions.weights.jump = 1)],

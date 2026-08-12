@@ -138,7 +138,7 @@ describe("Jo artwork package", () => {
         const png = readFileSync(resolve(repositoryRoot, manifest.runtime.output));
         const pixels = decodeExporterPng(png);
 
-        for (const role of ["stand", "walk", "sit", "greet", "fall"]) {
+        for (const role of ["stand", "walk", "sit", "greet", "fall", "mj-spin"]) {
             expect(roleAlphaBounds(pixels, role).maxY, `${role} floor anchor`).toBe(126);
         }
         expect(roleAlphaBounds(pixels, "crawl").minY).toBe(0);

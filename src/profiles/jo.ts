@@ -15,7 +15,7 @@ export const JO_PROFILE = {
         frameWidth: 128,
         frameHeight: 128,
         columns: 26,
-        rows: 9,
+        rows: 10,
     },
     animations: {
         stand: { row: 1, frames: 26 },
@@ -27,6 +27,7 @@ export const JO_PROFILE = {
         drag: { row: 9, frames: 1 },
         crawl: { row: 5, frames: 12 },
         climb: { row: 6, frames: 12 },
+        "mj-spin": { row: 10, frames: 12 },
     },
     roles: {
         stand: "stand",
@@ -38,6 +39,7 @@ export const JO_PROFILE = {
         jump: "jump",
         fall: "fall",
         drag: "drag",
+        special: "mj-spin",
     },
     behavior: {
         scale: 0.7,
@@ -46,7 +48,7 @@ export const JO_PROFILE = {
         movement: { speed: 54, acceleration: 108 },
         ordinaryTransitions: {
             cooldownMs: 3000,
-            weights: { stand: 50, sit: 35, walk: 12, greet: 3 },
+            weights: { stand: 50, sit: 35, walk: 12, greet: 3, special: 2 },
         },
         flip: {
             enabled: true,
