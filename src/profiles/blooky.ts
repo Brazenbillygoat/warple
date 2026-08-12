@@ -39,6 +39,7 @@ export const BLOOKY_PROFILE = {
         jump: "jump",
         fall: "fall",
         drag: "drag",
+        special: "greet",
     },
     behavior: {
         scale: 0.7,
@@ -47,7 +48,7 @@ export const BLOOKY_PROFILE = {
         movement: { speed: 54, acceleration: 108 },
         ordinaryTransitions: {
             cooldownMs: 3000,
-            weights: { stand: 50, sit: 35, walk: 12, greet: 3 },
+            weights: { stand: 50, sit: 35, walk: 12, greet: 3, special: 0 },
         },
         flip: {
             enabled: true,

@@ -20,8 +20,8 @@
     "scale": 2,
     "frameRate": 20,
     "columns": 26,
-    "rows": 9,
-    "sha256": "A40194698664BB87C4085BB19A0E1FA0716ABCF44E0CD11951F9DDC52CEDAC5D"
+    "rows": 10,
+    "sha256": "E5D46E3F66299ED5AD4FA783139B0F8C9DDA7D21F436587592513FCDE8395F5E"
   },
   "sources": [
     {
@@ -199,6 +199,14 @@
       "alignment": "center",
       "expandTiming": false,
       "runtimeFrames": 1
+    },
+    {
+      "role": "mj-spin",
+      "source": "jo-mj-spin-6frame.ase",
+      "row": 10,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 12
     }
   ]
 }

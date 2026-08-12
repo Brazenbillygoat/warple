@@ -16,6 +16,6 @@ Verify the checked-in sheet without writing with:
 npm run assets:jo:check
 ```
 
-The dependency-free exporter validates the approved source files, excludes the `Guides` layer, composites visible normal artwork layers, scales pixels twofold with nearest-neighbor sampling, and expands source timing at a profile-wide 20 frames per second. It produces one transparent 3328-by-1152 PNG at `public/media/companions/jo/spritesheet.png`, arranged as 26 columns by nine 128-pixel role rows.
+The dependency-free exporter validates the approved source files, excludes the `Guides` layer, composites visible normal artwork layers, scales pixels twofold with nearest-neighbor sampling, and expands source timing at a profile-wide 20 frames per second. It produces one transparent 3328-by-1280 PNG at `public/media/companions/jo/spritesheet.png`, arranged as 26 columns by ten 128-pixel role rows.
 
-The runtime rows are stand, walk, sit, greet, crawl, climb, jump, fall, and drag. Canonical contact, transition, alternate-idle, and spin sources are intentionally preserved even though the current nine-role engine does not consume them directly.
+The runtime rows are stand, walk, sit, greet, crawl, climb, jump, fall, drag, and mj-spin. The mj-spin row carries Jo's rare ordinary `special` flourish as 12 floor-aligned frames expanded from the six authored spin frames. Canonical contact, transition, and alternate-idle sources remain preserved even when the current ten-role engine does not consume them directly.

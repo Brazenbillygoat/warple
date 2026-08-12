@@ -22,6 +22,7 @@ Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by
 - Runs one selected Blooky or Jo companion on the operating system's primary display
 - Keeps the companion inside the display's complete usable work area
 - Supports calm weighted states, walking, dragging and throwing, falling, climbing, and crawling
+- Jo occasionally performs a rare MJ-spin flourish during ordinary calm behavior
 - Uses a click-through transparent overlay that accepts input only over visible companion pixels
 - Exposes `Show/Resume`, `Pause`, `Restart`, `Character`, and `Quit` through the tray
 - The `Character` submenu lists built-in profiles with a checkmark on the active one; selecting a different profile while running replaces the overlay without restarting the tray, and selecting while paused applies on the next resume

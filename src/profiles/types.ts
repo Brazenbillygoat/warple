@@ -1,4 +1,4 @@
-export const PROFILE_SCHEMA_VERSION = 1 as const;
+export const PROFILE_SCHEMA_VERSION = 2 as const;
 
 export const ENGINE_ROLES = [
     "stand",
@@ -10,9 +10,10 @@ export const ENGINE_ROLES = [
     "jump",
     "fall",
     "drag",
+    "special",
 ] as const;
 
-export const ORDINARY_ROLES = ["stand", "sit", "walk", "greet"] as const;
+export const ORDINARY_ROLES = ["stand", "sit", "walk", "greet", "special"] as const;
 
 export type EngineRole = (typeof ENGINE_ROLES)[number];
 export type OrdinaryRole = (typeof ORDINARY_ROLES)[number];
