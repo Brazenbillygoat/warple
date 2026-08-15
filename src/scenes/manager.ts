@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { error } from "@tauri-apps/plugin-log";
-import type { EngineRole, ValidatedCompanionProfile } from "../profiles/types";
+import type { EngineRole, OptionalAnimationRole, ValidatedCompanionProfile } from "../profiles/types";
 import type { Point } from "../runtime/cursorAwareness";
 import type { OverlayGeometry } from "../runtime/geometry";
 
@@ -61,6 +61,12 @@ export class ConfigManager {
 
     public getAnimationKeyForRole(role: EngineRole): string {
         return this.getAnimationKey(this.profile.roles[role]);
+    }
+
+    public getOptionalAnimationKey(role: OptionalAnimationRole): string | undefined {
+        const animationName = this.profile.optionalAnimationRoles?.[role];
+        if (!animationName) return undefined;
+        return this.getAnimationKey(animationName);
     }
 
     private getAnimationKey(animationName: string): string {

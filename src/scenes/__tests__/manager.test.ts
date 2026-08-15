@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OverlayGeometry } from "../../runtime/geometry";
+import { BLOOKY_PROFILE } from "../../profiles/blooky";
+import { JO_PROFILE } from "../../profiles/jo";
+import { validateCompanionProfile } from "../../profiles/validator";
 
 const mocks = vi.hoisted(() => ({
     invoke: vi.fn(),
@@ -10,9 +13,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/webviewWindow", () => ({
     getCurrentWebviewWindow: () => ({ setIgnoreCursorEvents: mocks.setIgnoreCursorEvents }),
 }));
-vi.mock("@tauri-apps/plugin-log", () => ({ error: vi.fn() }));
+vi.mock("@tauri-apps/plugin-log", () => ({ error: vi.fn(), info: vi.fn() }));
 
-import { InputManager } from "../manager";
+import { ConfigManager, InputManager } from "../manager";
 
 const geometry: OverlayGeometry = {
     generation: 1,
@@ -83,5 +86,30 @@ describe("InputManager cursor snapshots", () => {
         await vi.waitFor(() => expect(manager.getLatestCursorSnapshot()).toBeDefined());
         manager.checkIsMouseOverPet();
         expect(mocks.invoke).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("ConfigManager optional animation roles", () => {
+    it("resolves Jo's transition and hold animation keys", () => {
+        const manager = new ConfigManager(validateCompanionProfile(JO_PROFILE));
+        expect(manager.getOptionalAnimationKey("sit-down")).toBe("sit-down-jo");
+        expect(manager.getOptionalAnimationKey("stand-up")).toBe("stand-up-jo");
+        expect(manager.getOptionalAnimationKey("crawl-hold")).toBe("crawl-hold-jo");
+        expect(manager.getOptionalAnimationKey("climb-hold")).toBe("climb-hold-jo");
+    });
+
+    it("resolves Jo's idle and special engine-role keys", () => {
+        const manager = new ConfigManager(validateCompanionProfile(JO_PROFILE));
+        expect(manager.getAnimationKeyForRole("idle")).toBe("front-idle-jo");
+        expect(manager.getAnimationKeyForRole("special")).toBe("mj-spin-jo");
+    });
+
+    it("returns undefined for every optional role when the profile supplies none (Blooky)", () => {
+        const manager = new ConfigManager(validateCompanionProfile(BLOOKY_PROFILE));
+        expect(manager.getOptionalAnimationKey("sit-down")).toBeUndefined();
+        expect(manager.getOptionalAnimationKey("stand-up")).toBeUndefined();
+        expect(manager.getOptionalAnimationKey("crawl-hold")).toBeUndefined();
+        expect(manager.getOptionalAnimationKey("climb-hold")).toBeUndefined();
+        expect(manager.getAnimationKeyForRole("idle")).toBe("stand-blooky");
     });
 });

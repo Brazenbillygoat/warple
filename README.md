@@ -23,6 +23,7 @@ Warple began as a fork of [WindowPet](https://github.com/SeakMengs/WindowPet) by
 - Keeps the companion inside the display's complete usable work area
 - Supports calm weighted states, walking, dragging and throwing, falling, climbing, and crawling
 - Jo occasionally performs a rare MJ-spin flourish during ordinary calm behavior
+- Jo enters and leaves sit through authored sit-down and stand-up transitions, shows authored ceiling-hang and wall-contact poses while pausing on surfaces, and uses an authored front-facing idle animation
 - Uses a click-through transparent overlay that accepts input only over visible companion pixels
 - Exposes `Show/Resume`, `Pause`, `Restart`, `Character`, and `Quit` through the tray
 - The `Character` submenu lists built-in profiles with a checkmark on the active one; selecting a different profile while running replaces the overlay without restarting the tray, and selecting while paused applies on the next resume
