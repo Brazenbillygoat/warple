@@ -9,6 +9,7 @@ import {
     selectDefaultProfile,
 } from "../registry";
 import { validateCompanionProfile } from "../validator";
+import { selectWeightedOrdinaryRole } from "../weightedState";
 
 function copyProfile(): Record<string, any> {
     return structuredClone(BLOOKY_PROFILE);
@@ -51,9 +52,11 @@ describe("CompanionProfile validation", () => {
             fall: "fall",
             drag: "drag",
             special: "greet",
+            idle: "stand",
         });
         expect(profile.attribution.sourceUrl).toBe(BLOOKY_PROFILE.attribution.sourceUrl);
         expect(profile.artwork).toEqual(BUILT_IN_ARTWORK["blooky-shimeji"]);
+        expect(profile.optionalAnimationRoles).toBeUndefined();
         expect(profile.behavior).toMatchObject({
             scale: 0.7,
             animationFrameRate: 9,
@@ -61,7 +64,7 @@ describe("CompanionProfile validation", () => {
             movement: { speed: 54, acceleration: 108 },
             ordinaryTransitions: {
                 cooldownMs: 3000,
-                weights: { stand: 50, sit: 35, walk: 12, greet: 3, special: 0 },
+                weights: { stand: 50, sit: 35, walk: 12, greet: 3, idle: 0, special: 0 },
             },
             flip: { enabled: true, cooldownMs: 5000 },
             dragging: {
@@ -106,7 +109,7 @@ describe("CompanionProfile validation", () => {
             frameWidth: 128,
             frameHeight: 128,
             columns: 26,
-            rows: 10,
+            rows: 15,
         });
         expect(profile.animations).toEqual({
             stand: { row: 1, frames: 26 },
@@ -119,6 +122,11 @@ describe("CompanionProfile validation", () => {
             crawl: { row: 5, frames: 12 },
             climb: { row: 6, frames: 12 },
             "mj-spin": { row: 10, frames: 12 },
+            "front-idle": { row: 11, frames: 24 },
+            "sit-down": { row: 12, frames: 14 },
+            "stand-up": { row: 13, frames: 14 },
+            "crawl-hold": { row: 14, frames: 1 },
+            "climb-hold": { row: 15, frames: 1 },
         });
         expect(profile.roles).toEqual({
             stand: "stand",
@@ -131,7 +139,15 @@ describe("CompanionProfile validation", () => {
             fall: "fall",
             drag: "drag",
             special: "mj-spin",
+            idle: "front-idle",
         });
+        expect(profile.optionalAnimationRoles).toEqual({
+            "sit-down": "sit-down",
+            "stand-up": "stand-up",
+            "crawl-hold": "crawl-hold",
+            "climb-hold": "climb-hold",
+        });
+        expect(Object.isFrozen(profile.optionalAnimationRoles)).toBe(true);
         expect(profile.behavior).toMatchObject({
             scale: BLOOKY_PROFILE.behavior.scale,
             animationFrameRate: 20,
@@ -145,10 +161,11 @@ describe("CompanionProfile validation", () => {
             supportedTransitions: BLOOKY_PROFILE.behavior.supportedTransitions,
         });
         expect(profile.behavior.ordinaryTransitions.weights).toEqual({
-            stand: 50,
-            sit: 35,
-            walk: 12,
+            stand: 45,
+            sit: 31,
+            walk: 11,
             greet: 3,
+            idle: 8,
             special: 2,
         });
     });
@@ -158,12 +175,15 @@ describe("CompanionProfile validation", () => {
         profile.animations["quiet-pose"] = profile.animations.stand;
         delete profile.animations.stand;
         profile.roles.stand = "quiet-pose";
+        profile.roles.idle = "quiet-pose";
 
         expect(validateCompanionProfile(profile).roles.stand).toBe("quiet-pose");
     });
 
     it.each([
-        ["unsupported schema", (profile: any) => (profile.schemaVersion = 3)],
+        ["unsupported schema", (profile: any) => (profile.schemaVersion = 4)],
+        ["superseded schema version 1", (profile: any) => (profile.schemaVersion = 1)],
+        ["superseded schema version 2", (profile: any) => (profile.schemaVersion = 2)],
         ["invalid identifier", (profile: any) => (profile.id = "Blooky Profile")],
         ["unknown field", (profile: any) => (profile.executable = "nope")],
         ["unknown artwork", (profile: any) => (profile.artworkId = "not-registered")],
@@ -172,6 +192,27 @@ describe("CompanionProfile validation", () => {
         ["sheet mismatch", (profile: any) => (profile.frame.columns = 7)],
         ["out-of-bounds row", (profile: any) => (profile.animations.climb.row = 10)],
         ["unknown mapped animation", (profile: any) => (profile.roles.walk = "moonwalk")],
+        ["idle role unknown animation", (profile: any) => (profile.roles.idle = "moonwalk")],
+        [
+            "unknown optional role",
+            (profile: any) => (profile.optionalAnimationRoles = { "back-flip": "stand" }),
+        ],
+        [
+            "optional role unknown animation",
+            (profile: any) =>
+                (profile.optionalAnimationRoles = {
+                    "sit-down": "moonwalk",
+                    "stand-up": "stand",
+                }),
+        ],
+        [
+            "uncoupled sit-down",
+            (profile: any) => (profile.optionalAnimationRoles = { "sit-down": "stand" }),
+        ],
+        [
+            "uncoupled stand-up",
+            (profile: any) => (profile.optionalAnimationRoles = { "stand-up": "stand" }),
+        ],
         ["non-finite behavior", (profile: any) => (profile.behavior.gravity.y = Number.NaN)],
         [
             "non-finite throw speed",
@@ -187,10 +228,16 @@ describe("CompanionProfile validation", () => {
                     sit: 0,
                     walk: 0,
                     greet: 0,
+                    idle: 0,
                     special: 0,
                 }),
         ],
         ["physics-only ordinary role", (profile: any) => (profile.behavior.ordinaryTransitions.weights.jump = 1)],
+        ["missing idle weight", (profile: any) => delete profile.behavior.ordinaryTransitions.weights.idle],
+        [
+            "ordinary weights not totaling 100",
+            (profile: any) => (profile.behavior.ordinaryTransitions.weights.stand = 49),
+        ],
         ["invalid transition", (profile: any) => (profile.behavior.supportedTransitions.jumpToFall = "yes")],
     ])("rejects %s", (_label, mutate) => {
         const profile = copyProfile();
@@ -273,5 +320,26 @@ describe("built-in profile resolution", () => {
 
         expect(Object.keys(registry)).toEqual(originalKeys);
         expect((registry as any).blooky).toEqual(copyProfile());
+    });
+});
+
+describe("Blooky compatibility", () => {
+    it("keeps Blooky's ordinary probabilities and supplies no optional roles", () => {
+        const profile = validateCompanionProfile(BLOOKY_PROFILE);
+        expect(profile.optionalAnimationRoles).toBeUndefined();
+        const weights = profile.behavior.ordinaryTransitions.weights;
+        expect(weights).toEqual({ stand: 50, sit: 35, walk: 12, greet: 3, idle: 0, special: 0 });
+        expect(Object.values(weights).reduce((sum, value) => sum + value, 0)).toBe(100);
+    });
+
+    it("maps idle to the existing stand animation and never selects a zero-weight role", () => {
+        const profile = validateCompanionProfile(BLOOKY_PROFILE);
+        expect(profile.roles.idle).toBe("stand");
+        const weights = profile.behavior.ordinaryTransitions.weights;
+        for (const value of [0, 0.25, 0.5, 0.75, 0.9, 0.97, 0.999_999]) {
+            const role = selectWeightedOrdinaryRole(weights, value);
+            expect(role).not.toBe("idle");
+            expect(role).not.toBe("special");
+        }
     });
 });

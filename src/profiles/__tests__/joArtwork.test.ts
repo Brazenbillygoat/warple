@@ -125,6 +125,31 @@ describe("Jo artwork package", () => {
         });
     });
 
+    it("expands the runtime sheet to fifteen rows at 3328 by 1920", () => {
+        expect(manifest.runtime.rows).toBe(15);
+        expect(manifest.runtime.columns).toBe(26);
+        expect(manifest.runtime.cellWidth * manifest.runtime.columns).toBe(3328);
+        expect(manifest.runtime.cellHeight * manifest.runtime.rows).toBe(1920);
+        const roleNames = manifest.roles.map((role) => role.role);
+        expect(roleNames).toEqual([
+            "stand",
+            "walk",
+            "sit",
+            "greet",
+            "crawl",
+            "climb",
+            "jump",
+            "fall",
+            "drag",
+            "mj-spin",
+            "front-idle",
+            "sit-down",
+            "stand-up",
+            "crawl-hold",
+            "climb-hold",
+        ]);
+    });
+
     it("keeps manifest role rows and frame counts synchronized with Jo's profile", () => {
         for (const role of manifest.roles) {
             expect(JO_PROFILE.animations[role.role as keyof typeof JO_PROFILE.animations]).toEqual({
@@ -143,5 +168,16 @@ describe("Jo artwork package", () => {
         }
         expect(roleAlphaBounds(pixels, "crawl").minY).toBe(0);
         expect(roleAlphaBounds(pixels, "climb").maxX).toBe(127);
+    });
+
+    it("anchors the front idle, transition, and hold rows to their authored edges", () => {
+        const png = readFileSync(resolve(repositoryRoot, manifest.runtime.output));
+        const pixels = decodeExporterPng(png);
+
+        for (const role of ["front-idle", "sit-down", "stand-up"]) {
+            expect(roleAlphaBounds(pixels, role).maxY, `${role} floor anchor`).toBe(126);
+        }
+        expect(roleAlphaBounds(pixels, "crawl-hold").minY).toBe(0);
+        expect(roleAlphaBounds(pixels, "climb-hold").maxX).toBe(127);
     });
 });

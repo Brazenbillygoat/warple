@@ -1,4 +1,4 @@
-export const PROFILE_SCHEMA_VERSION = 2 as const;
+export const PROFILE_SCHEMA_VERSION = 3 as const;
 
 export const ENGINE_ROLES = [
     "stand",
@@ -11,12 +11,21 @@ export const ENGINE_ROLES = [
     "fall",
     "drag",
     "special",
+    "idle",
 ] as const;
 
-export const ORDINARY_ROLES = ["stand", "sit", "walk", "greet", "special"] as const;
+export const ORDINARY_ROLES = ["stand", "sit", "walk", "greet", "idle", "special"] as const;
+
+export const OPTIONAL_ANIMATION_ROLES = [
+    "sit-down",
+    "stand-up",
+    "crawl-hold",
+    "climb-hold",
+] as const;
 
 export type EngineRole = (typeof ENGINE_ROLES)[number];
 export type OrdinaryRole = (typeof ORDINARY_ROLES)[number];
+export type OptionalAnimationRole = (typeof OPTIONAL_ANIMATION_ROLES)[number];
 
 export interface AnimationDefinition {
     readonly row: number;
@@ -88,6 +97,7 @@ export interface CompanionProfile {
     readonly frame: FrameGeometry;
     readonly animations: Readonly<Record<string, AnimationDefinition>>;
     readonly roles: Readonly<Record<EngineRole, string>>;
+    readonly optionalAnimationRoles?: Readonly<Partial<Record<OptionalAnimationRole, string>>>;
     readonly behavior: CompanionBehavior;
 }
 

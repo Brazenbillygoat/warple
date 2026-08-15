@@ -1,11 +1,13 @@
 import { BUILT_IN_ARTWORK } from "./artwork";
 import {
     ENGINE_ROLES,
+    OPTIONAL_ANIMATION_ROLES,
     ORDINARY_ROLES,
     PROFILE_SCHEMA_VERSION,
     type BuiltInArtwork,
     type CompanionProfile,
     type EngineRole,
+    type OptionalAnimationRole,
     type OrdinaryRole,
     type ValidatedCompanionProfile,
 } from "./types";
@@ -57,10 +59,16 @@ function record(value: unknown, path: string): UnknownRecord {
     return value;
 }
 
-function exactKeys(value: UnknownRecord, keys: readonly string[], path: string): void {
+function exactKeys(
+    value: UnknownRecord,
+    keys: readonly string[],
+    path: string,
+    optionalKeys: readonly string[] = [],
+): void {
     const expected = new Set(keys);
+    const optional = new Set(optionalKeys);
     for (const key of Object.keys(value)) {
-        if (!expected.has(key)) fail(`${path}.${key} is not supported`);
+        if (!expected.has(key) && !optional.has(key)) fail(`${path}.${key} is not supported`);
     }
     for (const key of keys) {
         if (!(key in value)) fail(`${path}.${key} is required`);
@@ -189,6 +197,33 @@ function validateRoles(
     return result;
 }
 
+function validateOptionalAnimationRoles(
+    value: unknown,
+    animations: CompanionProfile["animations"],
+): CompanionProfile["optionalAnimationRoles"] {
+    if (value === undefined) return undefined;
+    const optionalAnimationRoles = record(value, "optionalAnimationRoles");
+    for (const key of Object.keys(optionalAnimationRoles)) {
+        if (!(OPTIONAL_ANIMATION_ROLES as readonly string[]).includes(key)) {
+            fail(`optionalAnimationRoles.${key} is not supported`);
+        }
+    }
+    const result: Partial<Record<OptionalAnimationRole, string>> = {};
+    for (const [key, entry] of Object.entries(optionalAnimationRoles)) {
+        const animationName = identifier(entry, `optionalAnimationRoles.${key}`);
+        if (!(animationName in animations)) {
+            fail(`optionalAnimationRoles.${key} references an unknown animation`);
+        }
+        (result as Record<string, string>)[key] = animationName;
+    }
+    const hasSitDown = "sit-down" in result;
+    const hasStandUp = "stand-up" in result;
+    if (hasSitDown !== hasStandUp) {
+        fail("optionalAnimationRoles sit-down and stand-up must be present together or absent");
+    }
+    return Object.keys(result).length === 0 ? undefined : result;
+}
+
 function validateWeights(
     value: unknown,
     roles: CompanionProfile["roles"],
@@ -209,7 +244,7 @@ function validateWeights(
         result[role] = weight;
         total += weight;
     }
-    if (total <= 0) fail("ordinary transition weights must have a positive total");
+    if (total !== 100) fail("ordinary transition weights must total 100");
     return result;
 }
 
@@ -410,7 +445,7 @@ export function validateCompanionProfile(
     artworkRegistry: Readonly<Record<string, BuiltInArtwork>> = BUILT_IN_ARTWORK,
 ): ValidatedCompanionProfile {
     const profile = record(value, "profile");
-    exactKeys(profile, PROFILE_KEYS, "profile");
+    exactKeys(profile, PROFILE_KEYS, "profile", ["optionalAnimationRoles"]);
     if (profile.schemaVersion !== PROFILE_SCHEMA_VERSION) fail("schemaVersion is not supported");
 
     const id = identifier(profile.id, "id");
@@ -421,6 +456,10 @@ export function validateCompanionProfile(
     const frame = validateFrame(profile.frame, artwork);
     const animations = validateAnimations(profile.animations, frame);
     const roles = validateRoles(profile.roles, animations);
+    const optionalAnimationRoles = validateOptionalAnimationRoles(
+        profile.optionalAnimationRoles,
+        animations,
+    );
 
     return deepFreeze({
         schemaVersion: PROFILE_SCHEMA_VERSION,
@@ -432,6 +471,7 @@ export function validateCompanionProfile(
         frame,
         animations,
         roles,
+        optionalAnimationRoles,
         behavior: validateBehavior(profile.behavior, roles, animations),
     });
 }

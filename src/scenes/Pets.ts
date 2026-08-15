@@ -1,6 +1,29 @@
 import { error, info } from "@tauri-apps/plugin-log";
-import { ORDINARY_ROLES, type EngineRole, type ValidatedCompanionProfile } from "../profiles/types";
+import {
+    ORDINARY_ROLES,
+    type EngineRole,
+    type OrdinaryRole,
+    type OptionalAnimationRole,
+    type ValidatedCompanionProfile,
+} from "../profiles/types";
 import { selectWeightedOrdinaryRole } from "../profiles/weightedState";
+import {
+    beginSurfaceHold,
+    cancelTransition,
+    completeSitDown,
+    completeStandUp,
+    enterSit,
+    initialCompanionTransitionState,
+    initialSurfaceHoldState,
+    invalidateSurfaceHold,
+    isSitTransitionActive,
+    leaveSit,
+    resumeSurfaceHold,
+    type CompanionTransitionIntention,
+    type CompanionTransitionState,
+    type SurfaceHoldState,
+    type TransitionInterruption,
+} from "../runtime/animationTransitions";
 import {
     cancelCursorAwareness,
     completeCursorGreeting,
@@ -114,6 +137,9 @@ export default class Pets extends Phaser.Scene {
     private startupFailed = false;
     private surfaceJumpInProgress = false;
     private surfaceJumpTween: Phaser.Tweens.Tween | undefined;
+    private transitionState: CompanionTransitionState = initialCompanionTransitionState();
+    private surfaceHoldState: SurfaceHoldState = initialSurfaceHoldState();
+    private sitTransitionCompletion: (() => void) | undefined;
 
     constructor() {
         super({ key: "Pets" });
@@ -663,9 +689,11 @@ export default class Pets extends Phaser.Scene {
             this.supportedSurfaceBodyId = undefined;
             this.cancelActiveCursorAwareness();
             this.cancelActiveIconAwareness();
+            this.cancelSitTransition(state);
         }
         if (state !== "climbing") this.climbSide = undefined;
         if (state !== "crawling") this.crawlEntrySide = undefined;
+        this.surfaceHoldState = invalidateSurfaceHold(this.surfaceHoldState);
     }
 
     private startInitialBehavior(): void {
@@ -696,14 +724,86 @@ export default class Pets extends Phaser.Scene {
             Math.random(),
         );
         this.setMechanicalState("grounded");
-        this.switchRole(pet, role);
+        this.requestGroundedRole(pet, role);
         this.nextOrdinaryTransitionAt =
             this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
+    }
+
+    private requestGroundedRole(pet: Pet, role: OrdinaryRole): void {
+        if (role === "sit") {
+            const result = enterSit(
+                this.transitionState,
+                this.configManager.getOptionalAnimationKey("sit-down") !== undefined,
+            );
+            this.transitionState = result.state;
+            this.executeTransitionIntention(pet, result.intention);
+            return;
+        }
+        const result = leaveSit(
+            this.transitionState,
+            role,
+            this.configManager.getOptionalAnimationKey("stand-up") !== undefined,
+        );
+        this.transitionState = result.state;
+        this.executeTransitionIntention(pet, result.intention);
+    }
+
+    private cancelSitTransition(interruption: TransitionInterruption): void {
+        const pet = this.pet;
+        if (pet) this.clearSitTransitionCompletion(pet);
+        this.transitionState = cancelTransition(this.transitionState, interruption).state;
+    }
+
+    private clearSitTransitionCompletion(pet: Pet): void {
+        if (!this.sitTransitionCompletion) return;
+        pet.off(Phaser.Animations.Events.ANIMATION_COMPLETE, this.sitTransitionCompletion);
+        this.sitTransitionCompletion = undefined;
+    }
+
+    private executeTransitionIntention(
+        pet: Pet,
+        intention: CompanionTransitionIntention,
+    ): void {
+        switch (intention.type) {
+            case "none":
+                return;
+            case "play-role":
+                this.clearSitTransitionCompletion(pet);
+                this.switchRole(pet, intention.role);
+                return;
+            case "play-optional-once": {
+                this.clearSitTransitionCompletion(pet);
+                const key = this.configManager.getOptionalAnimationKey(intention.optionalRole);
+                if (!key) return;
+                const capturedGeneration = this.transitionState.generation;
+                const optionalRole = intention.optionalRole;
+                const completion = () => {
+                    this.sitTransitionCompletion = undefined;
+                    const result =
+                        optionalRole === "sit-down"
+                            ? completeSitDown(this.transitionState, capturedGeneration)
+                            : completeStandUp(this.transitionState, capturedGeneration);
+                    this.transitionState = result.state;
+                    this.executeTransitionIntention(pet, result.intention);
+                };
+                this.sitTransitionCompletion = completion;
+                pet.anims.play({ key, repeat: 0 });
+                if (optionalRole === "sit-down") {
+                    pet.role = "sit";
+                } else {
+                    pet.role = this.transitionState.pendingTarget ?? pet.role;
+                }
+                this.updateDirection(pet, Direction.UNKNOWN);
+                pet.once(Phaser.Animations.Events.ANIMATION_COMPLETE, completion);
+                return;
+            }
+        }
     }
 
     private updateOrdinaryBehavior(pet: Pet): void {
         if (this.state !== "grounded") return;
         if (!ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number])) return;
+        if (isSitTransitionActive(this.transitionState)) return;
 
         if (this.time.now >= this.nextOrdinaryTransitionAt) this.playOrdinaryState(pet);
 
@@ -750,11 +850,13 @@ export default class Pets extends Phaser.Scene {
             case "none":
                 break;
             case "observe":
+                this.cancelSitTransition("cursor-observe");
                 this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
                 this.switchRole(pet, "stand");
                 this.faceCursorDirection(pet, intention.direction);
                 break;
             case "approach":
+                this.cancelSitTransition("cursor-approach");
                 this.switchRole(pet, "walk");
                 this.updateDirection(
                     pet,
@@ -762,6 +864,7 @@ export default class Pets extends Phaser.Scene {
                 );
                 break;
             case "greet":
+                this.cancelSitTransition("cursor-greet");
                 this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
                 this.faceCursorDirection(pet, intention.direction);
                 this.switchRole(pet, "greet", { repeat: 0 });
@@ -793,7 +896,7 @@ export default class Pets extends Phaser.Scene {
                     this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
                 if (this.state === "grounded") {
                     this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
-                    this.switchRole(pet, "stand");
+                    this.requestGroundedRole(pet, "stand");
                 }
                 break;
         }
@@ -857,11 +960,11 @@ export default class Pets extends Phaser.Scene {
             case "observe":
             case "inspect":
                 this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
-                this.switchRole(pet, "stand");
                 this.faceIconDirection(pet, intention.direction);
+                this.requestGroundedRole(pet, "stand");
                 break;
             case "approach":
-                this.switchRole(pet, "walk");
+                this.requestGroundedRole(pet, "walk");
                 this.updateDirection(
                     pet,
                     intention.direction === "left" ? Direction.LEFT : Direction.RIGHT,
@@ -869,15 +972,15 @@ export default class Pets extends Phaser.Scene {
                 break;
             case "sit":
                 this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
-                this.switchRole(pet, "sit");
                 this.faceIconDirection(pet, intention.direction);
+                this.requestGroundedRole(pet, "sit");
                 break;
             case "disengage":
                 this.nextOrdinaryTransitionAt =
                     this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
                 if (this.state === "grounded") {
                     this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
-                    this.switchRole(pet, "stand");
+                    this.requestGroundedRole(pet, "stand");
                 }
                 break;
         }
@@ -905,25 +1008,49 @@ export default class Pets extends Phaser.Scene {
             this.jumpFromSurface(pet);
             return;
         }
+        if (this.surfaceHoldState.active) return;
 
         const pauseSample = Phaser.Math.Between(0, climbing.pauseSampleMax);
         if (pauseSample > climbing.pauseTriggerMax || !pet.anims.isPlaying) return;
         const pausedState = this.state;
-        pet.anims.pause();
         this.updateDirection(pet, Direction.UNKNOWN);
         pet.setIgnoreGravity(true);
-        window.setTimeout(() => {
-            if (!pet.active || this.state !== pausedState || pet.anims.isPlaying) return;
-            pet.anims.resume();
-            this.updateDirection(
-                pet,
-                pausedState === "climbing"
-                    ? Direction.UP
-                    : pet.flipX
-                      ? Direction.UPSIDELEFT
-                      : Direction.UPSIDERIGHT,
-            );
-        }, Phaser.Math.Between(climbing.pauseMinMs, climbing.pauseMaxMs));
+
+        const holdRole: OptionalAnimationRole | undefined =
+            pausedState === "crawling" ? "crawl-hold" : "climb-hold";
+        const holdKey = holdRole ? this.configManager.getOptionalAnimationKey(holdRole) : undefined;
+        if (holdKey) {
+            const began = beginSurfaceHold(this.surfaceHoldState, pausedState);
+            this.surfaceHoldState = began.state;
+            const capturedGeneration = began.generation;
+            pet.anims.play({ key: holdKey, repeat: -1 });
+            window.setTimeout(() => {
+                if (!pet.active) return;
+                const resume = resumeSurfaceHold(this.surfaceHoldState, capturedGeneration, this.state);
+                this.surfaceHoldState = resume.state;
+                if (!resume.shouldResume) return;
+                this.resumeSurfaceAnimation(pet, pausedState);
+            }, Phaser.Math.Between(climbing.pauseMinMs, climbing.pauseMaxMs));
+        } else {
+            pet.anims.pause();
+            window.setTimeout(() => {
+                if (!pet.active || this.state !== pausedState || pet.anims.isPlaying) return;
+                pet.anims.resume();
+                this.resumeSurfaceAnimation(pet, pausedState);
+            }, Phaser.Math.Between(climbing.pauseMinMs, climbing.pauseMaxMs));
+        }
+    }
+
+    private resumeSurfaceAnimation(pet: Pet, pausedState: MechanicalState): void {
+        this.switchRole(pet, pausedState === "climbing" ? "climb" : "crawl");
+        this.updateDirection(
+            pet,
+            pausedState === "climbing"
+                ? Direction.UP
+                : pet.flipX
+                  ? Direction.UPSIDELEFT
+                  : Direction.UPSIDERIGHT,
+        );
     }
 
     private jumpFromSurface(pet: Pet): void {

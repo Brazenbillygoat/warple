@@ -20,8 +20,8 @@
     "scale": 2,
     "frameRate": 20,
     "columns": 26,
-    "rows": 10,
-    "sha256": "E5D46E3F66299ED5AD4FA783139B0F8C9DDA7D21F436587592513FCDE8395F5E"
+    "rows": 15,
+    "sha256": "E269B27C853DC1022CA3092277DC5FDFC1032AAB58A9F9B12609A28CD0FEF9C7"
   },
   "sources": [
     {
@@ -207,6 +207,46 @@
       "alignment": "floor",
       "expandTiming": true,
       "runtimeFrames": 12
+    },
+    {
+      "role": "front-idle",
+      "source": "jo-idle-4frame.ase",
+      "row": 11,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 24
+    },
+    {
+      "role": "sit-down",
+      "source": "jo-sit-down-4frame.ase",
+      "row": 12,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 14
+    },
+    {
+      "role": "stand-up",
+      "source": "jo-stand-up-4frame.ase",
+      "row": 13,
+      "alignment": "floor",
+      "expandTiming": true,
+      "runtimeFrames": 14
+    },
+    {
+      "role": "crawl-hold",
+      "source": "jo-ceiling-hang-canonical.ase",
+      "row": 14,
+      "alignment": "ceiling",
+      "expandTiming": false,
+      "runtimeFrames": 1
+    },
+    {
+      "role": "climb-hold",
+      "source": "jo-wall-contact-canonical.ase",
+      "row": 15,
+      "alignment": "right-wall",
+      "expandTiming": false,
+      "runtimeFrames": 1
     }
   ]
 }
