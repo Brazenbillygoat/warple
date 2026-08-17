@@ -40,10 +40,12 @@ import type {
 import type { OverlayGeometry, Rectangle } from "../runtime/geometry";
 import {
     cancelIconAwareness,
+    ICON_AWARENESS_TUNING,
     initialIconAwarenessState,
     updateIconAwareness,
     type IconAwarenessIntention,
     type IconAwarenessState,
+    type MountPlan,
 } from "../runtime/iconAwareness";
 import {
     aggregateCollisionContacts,
@@ -140,6 +142,14 @@ export default class Pets extends Phaser.Scene {
     private transitionState: CompanionTransitionState = initialCompanionTransitionState();
     private surfaceHoldState: SurfaceHoldState = initialSurfaceHoldState();
     private sitTransitionCompletion: (() => void) | undefined;
+    private iconPlatformBody: MatterJS.BodyType | undefined;
+    private iconPlatformBounds: Rectangle | undefined;
+    private iconVisitTargetId: string | undefined;
+    private iconMountInProgress = false;
+    private iconDepartInProgress = false;
+    private iconDeparted = false;
+    private iconVisitOwnsBody = false;
+    private iconVisitTween: Phaser.Tweens.Tween | undefined;
 
     constructor() {
         super({ key: "Pets" });
@@ -365,6 +375,193 @@ export default class Pets extends Phaser.Scene {
         platform.collisionFilter.mask = enabled ? CATEGORY.companion : 0;
     }
 
+    private addIconPlatform(platform: Rectangle, targetId: string): MatterJS.BodyType | undefined {
+        if (this.iconPlatformBody) return this.iconPlatformBody;
+        const label = `icon-platform-${targetId}`;
+        const body = this.matter.add.rectangle(
+            platform.x + platform.width / 2,
+            platform.y + platform.height / 2,
+            platform.width,
+            platform.height,
+            {
+                ...this.surfaceOptions(label),
+                collisionFilter: {
+                    category: CATEGORY.surface,
+                    mask: 0,
+                },
+            },
+        );
+        this.surfacesByBodyId.set(body.id, {
+            id: label,
+            role: "platform",
+            climbableEdges: [],
+        });
+        this.iconPlatformBody = body;
+        this.iconPlatformBounds = Object.freeze({ ...platform });
+        this.iconVisitTargetId = targetId;
+        return body;
+    }
+
+    private updateIconPlatformCollision(pet: Pet): void {
+        const platform = this.iconPlatformBody;
+        const platformBounds = this.iconPlatformBounds;
+        if (!platform || !platformBounds) return;
+        const enabled = shouldEnableOneWayPlatformCollision({
+            companionBounds: this.getBodyRectangle(pet.body),
+            platform: platformBounds,
+            verticalVelocity: matterVelocityToPixelsPerSecond(pet.body.velocity).y,
+            currentlySupported: this.supportedSurfaceBodyId === platform.id,
+        });
+        platform.collisionFilter.mask = enabled ? CATEGORY.companion : 0;
+    }
+
+    private removeIconPlatform(): void {
+        const platform = this.iconPlatformBody;
+        if (!platform) return;
+        this.clearContactsForBody(platform.id);
+        this.surfacesByBodyId.delete(platform.id);
+        this.matter.world.remove(platform);
+        this.iconPlatformBody = undefined;
+        this.iconPlatformBounds = undefined;
+        this.iconVisitTargetId = undefined;
+    }
+
+    private currentIconTargetId(): string | undefined {
+        const state = this.iconAwarenessState;
+        if (state.phase === "idle" || state.phase === "cooldown") return undefined;
+        return state.targetId;
+    }
+
+    private clearIconVisit(adoptFallState: boolean): void {
+        const pet = this.pet;
+        if (this.iconVisitTween) {
+            this.iconVisitTween.stop();
+            this.iconVisitTween = undefined;
+        }
+        const wasOnPlatform =
+            this.iconPlatformBody !== undefined &&
+            this.supportedSurfaceBodyId === this.iconPlatformBody.id;
+        const ownedBody = this.iconVisitOwnsBody;
+        this.iconMountInProgress = false;
+        this.iconDepartInProgress = false;
+        this.iconDeparted = false;
+        this.iconVisitOwnsBody = false;
+        this.removeIconPlatform();
+        if (wasOnPlatform) this.supportedSurfaceBodyId = undefined;
+        if (!pet || !pet.active) return;
+        const restoreBody = ownedBody && this.state !== "dragged";
+        if (restoreBody) {
+            this.restoreDynamicBody(pet.body, {
+                x: pet.body.position.x,
+                y: pet.body.position.y,
+            });
+        }
+        if (
+            adoptFallState &&
+            this.state !== "dragged" &&
+            (wasOnPlatform || restoreBody)
+        ) {
+            this.state = "airborne";
+            this.cancelSitTransition("airborne");
+            this.switchRole(pet, "jump");
+        }
+    }
+
+    private beginIconMount(pet: Pet, plan: MountPlan, facing: HorizontalDirection): void {
+        if (this.iconMountInProgress || this.iconPlatformBody) return;
+        const targetId = this.currentIconTargetId();
+        if (!targetId) return;
+        const platform = this.addIconPlatform(plan.platform, targetId);
+        if (!platform) return;
+        const platformId = platform.id;
+        const platformBounds = this.iconPlatformBounds;
+        if (!platformBounds) return;
+
+        const halfExtents = this.getBodyHalfExtents(pet.body);
+        const workArea = this.geometry.workArea;
+        const minX = workArea.x + halfExtents.x;
+        const maxX = workArea.x + workArea.width - halfExtents.x;
+        const targetX = Math.min(Math.max(plan.topCenterX, minX), maxX);
+        const targetY = platformBounds.y - halfExtents.y;
+        const tweenPosition = { x: pet.body.position.x, y: pet.body.position.y };
+
+        this.clearContactsForBody(pet.body.id);
+        this.makeBodyStatic(pet.body);
+        this.iconVisitOwnsBody = true;
+        this.iconMountInProgress = true;
+        this.supportedSurfaceBodyId = undefined;
+        this.state = "airborne";
+        this.switchRole(pet, plan.strategy === "elevated" ? "jump" : "climb");
+        this.setPetLookToTheLeft(pet, facing === "left");
+
+        this.iconVisitTween = this.tweens.add({
+            targets: tweenPosition,
+            x: targetX,
+            y: targetY,
+            duration: ICON_AWARENESS_TUNING.mountDurationMs,
+            ease: Ease.QuadEaseOut,
+            onUpdate: () => {
+                const position = { x: tweenPosition.x, y: tweenPosition.y };
+                this.matter.body.setPosition(pet.body, position);
+                pet.setPosition(position.x, position.y);
+            },
+            onComplete: () => {
+                this.iconVisitTween = undefined;
+                this.iconMountInProgress = false;
+                this.supportedSurfaceBodyId = platformId;
+                this.state = "grounded";
+            },
+        });
+    }
+
+    private beginIconDepart(
+        pet: Pet,
+        targetCenterX: number,
+        facing: HorizontalDirection,
+    ): void {
+        if (this.iconDepartInProgress || this.iconDeparted) return;
+        const halfExtents = this.getBodyHalfExtents(pet.body);
+        const workArea = this.geometry.workArea;
+        const floorY = workArea.y + workArea.height;
+        const minX = workArea.x + halfExtents.x;
+        const maxX = workArea.x + workArea.width - halfExtents.x;
+        const targetX = Math.min(Math.max(targetCenterX, minX), maxX);
+        const targetY = floorY - halfExtents.y;
+        const tweenPosition = { x: pet.body.position.x, y: pet.body.position.y };
+
+        this.cancelSitTransition("airborne");
+        this.clearContactsForBody(pet.body.id);
+        this.makeBodyStatic(pet.body);
+        this.iconVisitOwnsBody = true;
+        this.iconDepartInProgress = true;
+        this.iconDeparted = true;
+        this.supportedSurfaceBodyId = undefined;
+        this.state = "airborne";
+        this.switchRole(pet, "jump");
+        this.setPetLookToTheLeft(pet, facing === "left");
+
+        this.iconVisitTween = this.tweens.add({
+            targets: tweenPosition,
+            x: targetX,
+            y: targetY,
+            duration: ICON_AWARENESS_TUNING.departDurationMs,
+            ease: Ease.QuadEaseIn,
+            onUpdate: () => {
+                const position = { x: tweenPosition.x, y: tweenPosition.y };
+                this.matter.body.setPosition(pet.body, position);
+                pet.setPosition(position.x, position.y);
+            },
+            onComplete: () => {
+                this.iconVisitTween = undefined;
+                this.iconDepartInProgress = false;
+                this.iconVisitOwnsBody = false;
+                this.restoreDynamicBody(pet.body, { x: targetX, y: targetY });
+                this.state = "grounded";
+                this.removeIconPlatform();
+            },
+        });
+    }
+
     private createCompanion(): Pet {
         const bounds = this.geometry.workArea;
         const halfWidth = (this.profile.frame.frameWidth * this.profile.behavior.scale) / 2;
@@ -460,7 +657,15 @@ export default class Pets extends Phaser.Scene {
     }
 
     private applyContactPolicy(contacts: AggregatedContacts): void {
-        if (this.surfaceJumpInProgress || this.releaseFromMissingSurface(contacts)) return;
+        if (
+            this.surfaceJumpInProgress ||
+            this.iconMountInProgress ||
+            this.iconDepartInProgress ||
+            this.iconVisitOwnsBody ||
+            this.releaseFromMissingSurface(contacts)
+        ) {
+            return;
+        }
         if (this.state === "grounded" && contacts.down) {
             this.supportedSurfaceBodyId = this.supportingSurfaceBodyId(contacts);
         }
@@ -523,8 +728,14 @@ export default class Pets extends Phaser.Scene {
         const speed = this.profile.behavior.movement.speed;
 
         this.updateWindowPlatformCollision(pet);
+        this.updateIconPlatformCollision(pet);
 
-        if (this.surfaceJumpInProgress) {
+        if (
+            this.surfaceJumpInProgress ||
+            this.iconMountInProgress ||
+            this.iconDepartInProgress ||
+            this.iconVisitOwnsBody
+        ) {
             pet.setIgnoreGravity(true);
             this.matter.body.setVelocity(body, { x: 0, y: 0 });
             return;
@@ -928,13 +1139,17 @@ export default class Pets extends Phaser.Scene {
         snapshot: DesktopEnvironmentSnapshot | undefined,
         cursorAwarenessOwnsBehavior: boolean,
     ): boolean {
+        const iconPhase = this.iconAwarenessState.phase;
+        const iconVisitActive =
+            iconPhase === "mount" || iconPhase === "loaf" || iconPhase === "depart";
         const result = updateIconAwareness(this.iconAwarenessState, {
             nowMs: this.time.now,
             available: snapshot !== undefined,
             desktopShellActive: snapshot?.desktopShellActive ?? false,
             groundedEligible:
-                this.state === "grounded" &&
-                ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number]),
+                (this.state === "grounded" &&
+                    ORDINARY_ROLES.includes(pet.role as (typeof ORDINARY_ROLES)[number])) ||
+                iconVisitActive,
             higherPriorityOwned: cursorAwarenessOwnsBehavior,
             icons: snapshot?.desktopItems ?? [],
             companionBounds: this.getBodyRectangle(pet.body),
@@ -944,10 +1159,23 @@ export default class Pets extends Phaser.Scene {
         if (result.requestDetailsFor) {
             this.desktopEnvironmentManager.requestDetails(result.requestDetailsFor);
         }
-        if (!(cursorAwarenessOwnsBehavior && result.intention.type === "disengage")) {
+        if (result.intention.type === "disengage") {
+            // The materialized target surface and any in-flight mount/depart tween
+            // must always be torn down so no stale body/tween remains, even when a
+            // higher-priority behavior now owns the pet.
+            this.clearIconVisit(!cursorAwarenessOwnsBehavior);
+            this.nextOrdinaryTransitionAt =
+                this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
+            if (!cursorAwarenessOwnsBehavior && this.state === "grounded") {
+                this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
+                this.requestGroundedRole(pet, "stand");
+            }
+        } else if (!cursorAwarenessOwnsBehavior) {
             this.executeIconAwarenessIntention(pet, result.intention);
         }
-        return ["notice", "approach", "inspect", "sit"].includes(result.state.phase);
+        return ["notice", "approach", "inspect", "mount", "loaf", "depart"].includes(
+            result.state.phase,
+        );
     }
 
     private executeIconAwarenessIntention(
@@ -970,18 +1198,29 @@ export default class Pets extends Phaser.Scene {
                     intention.direction === "left" ? Direction.LEFT : Direction.RIGHT,
                 );
                 break;
+            case "mount":
+                this.beginIconMount(pet, intention.plan, intention.direction);
+                break;
             case "sit":
+                // Loaf on the locked top: only once the bounded mount has settled the
+                // companion onto the materialized platform.
+                if (this.iconMountInProgress || this.iconDepartInProgress) break;
+                if (
+                    this.iconPlatformBody !== undefined &&
+                    this.supportedSurfaceBodyId !== this.iconPlatformBody.id
+                ) {
+                    break;
+                }
                 this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
                 this.faceIconDirection(pet, intention.direction);
                 this.requestGroundedRole(pet, "sit");
                 break;
+            case "depart":
+                this.beginIconDepart(pet, intention.targetCenterX, intention.direction);
+                break;
             case "disengage":
-                this.nextOrdinaryTransitionAt =
-                    this.time.now + this.profile.behavior.ordinaryTransitions.cooldownMs;
-                if (this.state === "grounded") {
-                    this.matter.body.setVelocity(pet.body, { x: 0, y: pet.body.velocity.y });
-                    this.requestGroundedRole(pet, "stand");
-                }
+                // Handled by updateIconAwarenessBehavior so the materialized surface is
+                // always torn down even when a higher-priority behavior owns the pet.
                 break;
         }
     }
@@ -992,6 +1231,7 @@ export default class Pets extends Phaser.Scene {
     }
 
     private cancelActiveIconAwareness(): void {
+        this.clearIconVisit(false);
         const result = cancelIconAwareness(this.iconAwarenessState, this.time.now);
         this.iconAwarenessState = result.state;
         if (result.intention.type === "disengage") {

@@ -7,13 +7,29 @@ export const ICON_AWARENESS_TUNING = Object.freeze({
     clearance: 24,
     standOffHysteresis: 12,
     inspectDwellMs: 1250,
+    mountDurationMs: 650,
+    mountTimeoutMs: 900,
     sitDwellMs: 2500,
+    departDurationMs: 650,
     cooldownMs: 5000,
     verticalEligibilityGap: 128,
     boundsTolerance: 2,
+    directStepHeight: 96,
+    jumpBound: 288,
+    platformThickness: 8,
+    minimumPlatformWidth: 24,
 });
 
 export type HorizontalDirection = "left" | "right";
+export type LockedSide = "left" | "right";
+export type MountStrategy = "direct" | "elevated" | "unreachable";
+
+export interface MountPlan {
+    readonly strategy: MountStrategy;
+    readonly lockedSide: LockedSide;
+    readonly platform: Rectangle;
+    readonly topCenterX: number;
+}
 
 interface OwnedTarget {
     readonly targetId: string;
@@ -22,12 +38,18 @@ interface OwnedTarget {
     readonly facing: HorizontalDirection;
 }
 
+interface MountTarget extends OwnedTarget {
+    readonly mount: MountPlan;
+}
+
 export type IconAwarenessState =
     | { readonly phase: "idle" }
     | ({ readonly phase: "notice"; readonly startedAt: number } & OwnedTarget)
     | ({ readonly phase: "approach" } & OwnedTarget)
     | ({ readonly phase: "inspect"; readonly startedAt: number } & OwnedTarget)
-    | ({ readonly phase: "sit"; readonly startedAt: number } & OwnedTarget)
+    | ({ readonly phase: "mount"; readonly startedAt: number } & MountTarget)
+    | ({ readonly phase: "loaf"; readonly startedAt: number } & MountTarget)
+    | ({ readonly phase: "depart"; readonly startedAt: number } & MountTarget)
     | { readonly phase: "cooldown"; readonly startedAt: number; readonly completedTargetId: string };
 
 export type IconAwarenessIntention =
@@ -35,7 +57,9 @@ export type IconAwarenessIntention =
     | { readonly type: "observe"; readonly direction: HorizontalDirection }
     | { readonly type: "approach"; readonly direction: HorizontalDirection; readonly targetCenterX: number }
     | { readonly type: "inspect"; readonly direction: HorizontalDirection }
+    | { readonly type: "mount"; readonly direction: HorizontalDirection; readonly plan: MountPlan }
     | { readonly type: "sit"; readonly direction: HorizontalDirection }
+    | { readonly type: "depart"; readonly direction: HorizontalDirection; readonly targetCenterX: number }
     | { readonly type: "disengage" };
 
 export interface IconAwarenessResult {
@@ -69,10 +93,12 @@ export function updateIconAwareness(
     const nowMs = finiteTime(observation.nowMs);
     if (!safeObservation(observation)) return cancel(previous, nowMs);
 
+    let preferDifferentThan: string | undefined;
     if (previous.phase === "cooldown") {
         if (nowMs - previous.startedAt < ICON_AWARENESS_TUNING.cooldownMs) {
             return { state: previous, intention: NO_ACTION };
         }
+        preferDifferentThan = previous.completedTargetId;
         previous = IDLE;
     }
 
@@ -86,15 +112,10 @@ export function updateIconAwareness(
     }
 
     if (previous.phase === "idle") {
-        const target = selectTarget(observation);
+        const target = selectTarget(observation, preferDifferentThan);
         if (!target) return { state: previous, intention: NO_ACTION };
-        const state: IconAwarenessState = Object.freeze({
-            phase: "notice",
-            startedAt: nowMs,
-            ...target,
-        });
         return {
-            state,
+            state: Object.freeze({ phase: "notice", startedAt: nowMs, ...target }),
             intention: { type: "observe", direction: target.facing },
             requestDetailsFor: target.targetId,
         };
@@ -103,11 +124,17 @@ export function updateIconAwareness(
     if (previous.phase === "cooldown") return { state: previous, intention: NO_ACTION };
 
     const target = observation.icons.find((icon) => icon.id === previous.targetId);
-    if (
-        !target ||
-        !eligibleIcon(target, observation.companionBounds, observation.workArea) ||
-        !rectanglesEquivalent(target.bounds, previous.targetBounds)
-    ) {
+    if (!target) return cancel(previous, nowMs);
+    // Once the companion has committed to a target (mounting, loafing, or
+    // departing) it intentionally leaves the selection range, so only the
+    // target's intrinsic validity and bounds are re-gated — not the
+    // companion-relative distance/vertical gap used for selection.
+    const committed =
+        previous.phase === "mount" || previous.phase === "loaf" || previous.phase === "depart";
+    const stillValid = committed
+        ? targetIntrinsicValid(target, observation.workArea)
+        : eligibleIcon(target, observation.companionBounds, observation.workArea);
+    if (!stillValid || !rectanglesEquivalent(target.bounds, previous.targetBounds)) {
         return cancel(previous, nowMs);
     }
 
@@ -129,15 +156,57 @@ export function updateIconAwareness(
                     intention: { type: "inspect", direction: previous.facing },
                 };
             }
+            return beginMount(previous, observation.companionBounds, observation.workArea, nowMs);
+        case "mount": {
+            const unreachable = previous.mount.strategy === "unreachable";
+            const duration = unreachable
+                ? ICON_AWARENESS_TUNING.mountTimeoutMs
+                : ICON_AWARENESS_TUNING.mountDurationMs;
+            if (nowMs - previous.startedAt < duration) {
+                return unreachable
+                    ? {
+                          state: previous,
+                          intention: { type: "inspect", direction: previous.facing },
+                      }
+                    : {
+                          state: previous,
+                          intention: {
+                              type: "mount",
+                              direction: previous.facing,
+                              plan: previous.mount,
+                          },
+                      };
+            }
+            if (unreachable) return completed(previous.targetId, nowMs);
             return {
-                state: Object.freeze({ ...previous, phase: "sit", startedAt: nowMs }),
+                state: Object.freeze({ ...previous, phase: "loaf", startedAt: nowMs }),
                 intention: { type: "sit", direction: previous.facing },
             };
-        case "sit":
+        }
+        case "loaf":
             if (nowMs - previous.startedAt < ICON_AWARENESS_TUNING.sitDwellMs) {
                 return {
                     state: previous,
                     intention: { type: "sit", direction: previous.facing },
+                };
+            }
+            return {
+                state: Object.freeze({ ...previous, phase: "depart", startedAt: nowMs }),
+                intention: {
+                    type: "depart",
+                    direction: previous.facing,
+                    targetCenterX: previous.standCenterX,
+                },
+            };
+        case "depart":
+            if (nowMs - previous.startedAt < ICON_AWARENESS_TUNING.departDurationMs) {
+                return {
+                    state: previous,
+                    intention: {
+                        type: "depart",
+                        direction: previous.facing,
+                        targetCenterX: previous.standCenterX,
+                    },
                 };
             }
             return completed(previous.targetId, nowMs);
@@ -176,7 +245,82 @@ function approach(
     };
 }
 
-function selectTarget(observation: IconAwarenessObservation): OwnedTarget | undefined {
+function beginMount(
+    target: OwnedTarget,
+    companionBounds: Rectangle,
+    workArea: Rectangle,
+    nowMs: number,
+): IconAwarenessResult {
+    const plan = computeMountPlan(target.targetBounds, companionBounds, workArea, target.facing);
+    const state: IconAwarenessState = Object.freeze({
+        phase: "mount",
+        startedAt: nowMs,
+        targetId: target.targetId,
+        targetBounds: target.targetBounds,
+        standCenterX: target.standCenterX,
+        facing: target.facing,
+        mount: plan,
+    });
+    if (plan.strategy === "unreachable") {
+        return { state, intention: { type: "inspect", direction: target.facing } };
+    }
+    return {
+        state,
+        intention: { type: "mount", direction: target.facing, plan },
+    };
+}
+
+function computeMountPlan(
+    icon: Rectangle,
+    companion: Rectangle,
+    workArea: Rectangle,
+    facing: HorizontalDirection,
+): MountPlan {
+    const lockedSide: LockedSide = facing === "right" ? "left" : "right";
+    const companionFeet = companion.y + companion.height;
+    const reach = companionFeet - icon.y;
+    let strategy: MountStrategy =
+        reach <= ICON_AWARENESS_TUNING.directStepHeight
+            ? "direct"
+            : reach <= ICON_AWARENESS_TUNING.jumpBound
+              ? "elevated"
+              : "unreachable";
+    const platform = createIconPlatform(icon, workArea);
+    if (!platform) strategy = "unreachable";
+    const platformRect = platform ?? {
+        x: icon.x,
+        y: icon.y,
+        width: icon.width,
+        height: ICON_AWARENESS_TUNING.platformThickness,
+    };
+    const topCenterX = platform ? platform.x + platform.width / 2 : icon.x + icon.width / 2;
+    return Object.freeze({
+        strategy,
+        lockedSide,
+        platform: Object.freeze(platformRect),
+        topCenterX,
+    });
+}
+
+function createIconPlatform(icon: Rectangle, workArea: Rectangle): Rectangle | undefined {
+    const left = Math.max(icon.x, workArea.x);
+    const right = Math.min(icon.x + icon.width, workArea.x + workArea.width);
+    const width = right - left;
+    if (width < ICON_AWARENESS_TUNING.minimumPlatformWidth) return undefined;
+    const y = Math.max(icon.y, workArea.y);
+    if (y >= workArea.y + workArea.height) return undefined;
+    return {
+        x: left,
+        y,
+        width,
+        height: ICON_AWARENESS_TUNING.platformThickness,
+    };
+}
+
+function selectTarget(
+    observation: IconAwarenessObservation,
+    preferDifferentThan: string | undefined,
+): OwnedTarget | undefined {
     const companionCenterX = observation.companionBounds.x + observation.companionBounds.width / 2;
     return observation.icons
         .map((icon) => {
@@ -189,11 +333,14 @@ function selectTarget(observation: IconAwarenessObservation): OwnedTarget | unde
                 priority: icon.selected && icon.focused ? 0 : icon.selected ? 1 : 2,
                 distance: rectangleDistance(observation.companionBounds, icon.bounds),
                 horizontalDistance: Math.abs(stand.standCenterX - companionCenterX),
+                repeatPenalty:
+                    preferDifferentThan !== undefined && icon.id === preferDifferentThan ? 1 : 0,
             };
         })
         .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined)
         .sort(
             (a, b) =>
+                a.repeatPenalty - b.repeatPenalty ||
                 a.priority - b.priority ||
                 a.distance - b.distance ||
                 a.horizontalDistance - b.horizontalDistance ||
@@ -218,6 +365,14 @@ function eligibleIcon(icon: DesktopItemSummary, companion: Rectangle, workArea: 
         return false;
     }
     return rectangleDistance(companion, icon.bounds) <= ICON_AWARENESS_TUNING.awarenessRadius;
+}
+
+function targetIntrinsicValid(icon: DesktopItemSummary, workArea: Rectangle): boolean {
+    return (
+        !icon.attributes.hidden &&
+        validRectangle(icon.bounds) &&
+        contains(workArea, icon.bounds)
+    );
 }
 
 function standPosition(
