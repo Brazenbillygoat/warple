@@ -23,7 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Local repository guidance and active planning
+# Local personal guidance and active planning
 /AGENTS.md
-/docs/PROJECT_CONTEXT.md
 /docs/ACTIVE_PLAN.md
